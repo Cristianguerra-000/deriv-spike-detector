@@ -36,6 +36,10 @@ const state = {
   tickSubId: null,
   candles: [],          // últimas velas cargadas (para cálculos)
   priceLines: [],       // referencias a las price lines dibujadas
+  lastFavorPct: 0,      // último % de señales a favor (para redibujar sin Firebase)
+  spikeAt: null,        // epoch de la vela donde se detectó un spike
+  spikeCooldown: 5,     // velas de espera post-spike antes de nueva recomendación
+  newCandleTime: null,  // time de la vela actualmente abierta
 };
 
 // ---------- WS helpers ----------
@@ -338,6 +342,9 @@ function onOhlc(ohlc) {
     time: +ohlc.open_time,
     open: +ohlc.open, high: +ohlc.high, low: +ohlc.low, close: +ohlc.close,
   });
+
+  const isNewCandle = state.newCandleTime !== null && +ohlc.open_time !== state.newCandleTime;
+
   // Actualizar última vela en cache
   if (state.candles.length) {
     const last = state.candles[state.candles.length - 1];
@@ -345,6 +352,8 @@ function onOhlc(ohlc) {
       last.open = +ohlc.open; last.high = +ohlc.high;
       last.low = +ohlc.low; last.close = +ohlc.close;
     } else {
+      // Nueva vela cerró → detectar spike en la vela que ACABÓ de cerrar
+      _detectAndHandleSpike(last);
       state.candles.push({
         time: +ohlc.open_time,
         open: +ohlc.open, high: +ohlc.high, low: +ohlc.low, close: +ohlc.close,
@@ -352,7 +361,78 @@ function onOhlc(ohlc) {
       if (state.candles.length > 5100) state.candles.shift();
     }
   }
+  state.newCandleTime = +ohlc.open_time;
+
   updateMAs();
+
+  // Cada vela nueva: redibujar Fib + actualizar línea de precio actual
+  if (isNewCandle) {
+    drawFib(state.symbol);
+    // Redibujar zonas de entrada con el último pct conocido
+    if (state.symbol) {
+      const isCrash = state.symbol.startsWith("CRASH");
+      const isBoom  = state.symbol.startsWith("BOOM");
+      if ((isCrash || isBoom) && !_inSpikeCooldown()) {
+        drawTradeZones(state.symbol, isCrash, state.lastFavorPct);
+      }
+    }
+  } else {
+    // Misma vela: solo actualizar la línea de precio actual (sin redibujar todo)
+    _updateActualLine();
+  }
+}
+
+function _detectAndHandleSpike(closedCandle) {
+  if (!state.symbol) return;
+  const isCrash = state.symbol.startsWith("CRASH");
+  const isBoom  = state.symbol.startsWith("BOOM");
+  if (!isCrash && !isBoom) return;
+
+  // ATR de las 14 velas anteriores
+  const prev14 = state.candles.slice(-14);
+  const atr = prev14.reduce((s, c) => s + (c.high - c.low), 0) / Math.max(prev14.length, 1);
+  const candleRange = closedCandle.high - closedCandle.low;
+  const bodyMove = Math.abs(closedCandle.close - closedCandle.open);
+
+  // Spike: vela cuyo rango > 3×ATR Y cuerpo > 2×ATR
+  const isSpike = candleRange > atr * 3 && bodyMove > atr * 2;
+  if (!isSpike) return;
+
+  // Verificar dirección correcta del spike
+  const crashSpike = closedCandle.close < closedCandle.open;  // bajista
+  const boomSpike  = closedCandle.close > closedCandle.open;  // alcista
+  if (isCrash && !crashSpike) return;
+  if (isBoom  && !boomSpike)  return;
+
+  // ✓ Spike confirmado → limpiar zonas y entrar en cooldown
+  state.spikeAt = closedCandle.time;
+  clearPriceLines();
+
+  // Mostrar aviso en el panel de entrada
+  const panel = $("#entryPanel");
+  panel.className = "entry-panel entry-spike";
+  $("#entryIcon").textContent = isCrash ? "💥" : "🚀";
+  $("#entryTitle").textContent = `SPIKE DETECTADO — Cooldown ${state.spikeCooldown} velas`;
+  $("#entrySub").textContent = `El spike ${isCrash ? "bajista" : "alcista" } se confirmó. Esperando nueva estructura para re-entrada.`;
+  $("#entryScore").textContent = "---";
+  $("#entryBar").style.width = "0%";
+}
+
+function _inSpikeCooldown() {
+  if (!state.spikeAt || !state.candles.length) return false;
+  // Contar velas cerradas desde el spike
+  const spikeIdx = state.candles.findIndex((c) => c.time === state.spikeAt);
+  if (spikeIdx === -1) return false;
+  const velasDespues = state.candles.length - 1 - spikeIdx;
+  return velasDespues < state.spikeCooldown;
+}
+
+function _updateActualLine() {
+  if (!state.candles.length || !state.priceLines.length) return;
+  const last = state.candles[state.candles.length - 1].close;
+  // La última price line es siempre la de "Actual"
+  const pl = state.priceLines[state.priceLines.length - 1];
+  try { pl.applyOptions({ price: last, title: `Actual ${last.toFixed(3)}` }); } catch (_) {}
 }
 
 function onTick(_tick) { /* hook futuro */ }
@@ -368,6 +448,10 @@ async function loadAlgorithmResults(symbol) {
   // Limpia zonas de la gráfica del símbolo anterior
   clearPriceLines();
   clearFib();
+  // Resetear cooldown al cambiar de símbolo
+  state.spikeAt = null;
+  state.lastFavorPct = 0;
+  state.newCandleTime = null;
 
   // Resetear panel de entrada
   const panel = $("#entryPanel");
@@ -466,6 +550,9 @@ function updateEntryPanel(symbol) {
     return;
   }
 
+  // Si estamos en cooldown post-spike, no sobrescribir el aviso
+  if (_inSpikeCooldown()) return;
+
   let favor = 0;
   let total = 0;
   cards.forEach((card) => {
@@ -485,6 +572,7 @@ function updateEntryPanel(symbol) {
 
   $("#entryScore").textContent = `${favor}/${total}`;
   $("#entryBar").style.width = `${pct.toFixed(0)}%`;
+  state.lastFavorPct = pct;  // guardar para redibujar en cada vela
 
   if (pct >= 55) {
     panel.className = "entry-panel entry-strong";

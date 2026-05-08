@@ -222,6 +222,12 @@ html, body {
 .entry-panel.entry-strong   { border-color: #26c281; background: rgba(38,194,129,.06); }
 .entry-panel.entry-moderate { border-color: #ffd54f; background: rgba(255,213,79,.05); }
 .entry-panel.entry-weak     { border-color: #ef5350; background: rgba(239,83,80,.04); }
+.entry-panel.entry-spike    { border-color: #ff7043; background: rgba(255,112,67,.08);
+  animation: spike-flash 0.6s ease 3; }
+@keyframes spike-flash {
+  0%,100% { border-color: #ff7043; }
+  50%      { border-color: #fff; box-shadow: 0 0 18px rgba(255,112,67,.6); }
+}
 
 .entry-panel.entry-strong   .entry-bar { background: #26c281; }
 .entry-panel.entry-moderate .entry-bar { background: #ffd54f; }
