@@ -160,9 +160,11 @@ async function loadCandles(symbol) {
     await send({ forget: state.tickSubId });
     state.tickSubId = null;
   }
+  // Indicador de carga
+  $("#symbolTitle").textContent = `${symbol} · Cargando histórico…`;
   const resp = await send({
     ticks_history: symbol,
-    count: 500,
+    count: 5000,            // máximo permitido por la API de Deriv
     end: "latest",
     style: "candles",
     granularity: state.granularity,
@@ -174,6 +176,11 @@ async function loadCandles(symbol) {
     open: +c.open, high: +c.high, low: +c.low, close: +c.close,
   }));
   state.candleSeries.setData(candles);
+  // Ajustar zoom para mostrar todo el histórico cargado
+  state.chart.timeScale().fitContent();
+  // Restaurar título con número de velas cargadas
+  const displayName = document.querySelector(`.symbol-list li[data-symbol="${symbol}"]`)?.textContent || symbol;
+  $("#symbolTitle").textContent = `${displayName} · ${candles.length} velas`;
 }
 
 function onOhlc(ohlc) {
