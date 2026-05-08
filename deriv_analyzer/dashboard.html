@@ -702,7 +702,8 @@ const INDICES_META = {
   "CRASH1000": {name:"Crash 1000", type:"crash", freq:1000, col:"#ff8a80", dir:"DOWN"},
 };
 
-const TIMEFRAMES = {'1M':60,'5M':300,'15M':900,'30M':1800,'1H':3600,'4H':14400};
+// Velas por número de ticks (tick-candles, ideal para sintéticos)
+const TICKFRAMES = {'T1':1,'T5':5,'T10':10,'T20':20,'T50':50,'T100':100};
 const HMM_STATES = [
   {n:'ACUMULACIÓN',  col:'#ff9100'},
   {n:'TENDENCIA',    col:'#00c8ff'},
@@ -710,7 +711,7 @@ const HMM_STATES = [
 ];
 
 let currentSym  = "BOOM500";
-let currentTF   = '1M';
+let currentTF   = 'T10';  // default: 1 vela cada 10 ticks
 let charts      = {};
 let lastData    = {};
 let opsData     = {};
@@ -776,7 +777,7 @@ function buildTabs(){
 
 function buildTFTabs(){
   const c = document.getElementById('tftabs');
-  Object.keys(TIMEFRAMES).forEach(tf=>{
+  Object.keys(TICKFRAMES).forEach(tf=>{
     const b = document.createElement('button');
     b.className = 'tfb' + (tf === currentTF ? ' on' : '');
     b.textContent = tf; b.id = 'tf-'+tf;
@@ -784,6 +785,12 @@ function buildTFTabs(){
       document.querySelectorAll('.tfb').forEach(x=>x.classList.remove('on'));
       b.classList.add('on');
       currentTF = tf;
+      // Reconstruir chart con nuevo timeframe
+      const sym = currentSym;
+      document.getElementById('chart').innerHTML = '';
+      Object.values(charts).forEach(c2=>{ try{ c2.chart.remove(); }catch(e){} });
+      charts = {};
+      buildChart(sym);
     });
     c.appendChild(b);
   });
@@ -799,16 +806,16 @@ function buildChart(sym){
     height: container.clientHeight,
     layout:{ background:{color:'#020810'}, textColor:'#7ab8c8' },
     grid:{
-      vertLines:{color:'rgba(0,200,255,.07)'},
-      horzLines:{color:'rgba(0,200,255,.07)'},
+      vertLines:{color:'rgba(0,200,255,.05)'},
+      horzLines:{color:'rgba(0,200,255,.05)'},
     },
     crosshair:{ mode:LightweightCharts.CrosshairMode.Normal },
     timeScale:{
       borderColor:'rgba(0,200,255,.2)',
-      timeVisible:true, secondsVisible:false, barSpacing:6,
-      minBarSpacing:2, rightOffset:4,
+      timeVisible:false, barSpacing:4, minBarSpacing:1,
+      rightOffset:6, fixLeftEdge:false, lockVisibleTimeRangeOnResize:true,
     },
-    rightPriceScale:{ borderColor:'rgba(0,200,255,.2)', scaleMargins:{top:0.1,bottom:0.1} },
+    rightPriceScale:{ borderColor:'rgba(0,200,255,.2)', scaleMargins:{top:0.08,bottom:0.08} },
   });
 
   const series = chart.addCandlestickSeries({
@@ -1280,18 +1287,25 @@ function connect(){
         if(!charts[sym]) buildChart(sym);
         const ch = charts[sym];
         if(ch){
-          const tfSecs = TIMEFRAMES[currentTF];
-          const bucket = Math.floor(d.epoch/tfSecs)*tfSecs;
-          if(!ch.currentCandle || ch.currentCandle.time !== bucket){
-            ch.currentCandle = {time:bucket, open:d.price, high:d.price, low:d.price, close:d.price};
+          // Tick-based candles: 1 vela cada N ticks
+          const ticksPerCandle = TICKFRAMES[currentTF] || 10;
+          // Usar contador global de ticks del símbolo como tiempo del chart
+          const tickNum  = d.tick || totalTicks;
+          const bucket   = Math.floor(tickNum / ticksPerCandle);  // índice de vela
+          if(!ch.currentCandle || ch.currentCandle.bucket !== bucket){
+            if(ch.currentCandle){
+              // Finalizar vela anterior
+              ch.series.update(ch.currentCandle);
+            }
+            ch.currentCandle = {time: bucket, bucket, open:d.price, high:d.price, low:d.price, close:d.price};
           } else {
             ch.currentCandle.high  = Math.max(ch.currentCandle.high, d.price);
             ch.currentCandle.low   = Math.min(ch.currentCandle.low,  d.price);
             ch.currentCandle.close = d.price;
           }
           ch.series.update(ch.currentCandle);
-          // Filtrado Kalman
-          ch.filtSeries.update({time:bucket, value:d.price_filtered});
+          // Filtrado Kalman — una línea por tick (usar tickNum como tiempo)
+          ch.filtSeries.update({time: bucket, value: d.price_filtered});
           // Marcador spike — solo en dirección objetivo
           if(d.spike_detected && d.spike_in_target){
             const mkr = {
@@ -1299,7 +1313,7 @@ function connect(){
               position: d.spike_dir==='UP'?'belowBar':'aboveBar',
               color:    d.spike_dir==='UP'?'#00e676':'#ff1744',
               shape:    d.spike_dir==='UP'?'arrowUp':'arrowDown',
-              text:     `${d.zscore}σ ★`
+              text:     `${d.zscore}σ`
             };
             ch.markers = [...ch.markers, mkr].slice(-50);
             ch.series.setMarkers(ch.markers);
