@@ -2,6 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#020810">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>DERIV — Spike Detection System v2</title>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
@@ -264,6 +267,143 @@ table.ops-tbl td{font-size:9px;padding:5px 6px;border-bottom:1px solid rgba(0,20
 .td-up{color:var(--green)}.td-down{color:var(--red)}
 .td-score{font-size:8px;color:var(--txt)}
 tr:hover td{background:rgba(0,200,255,.04)}
+
+/* ══════════════════════════════════════════════
+   RESPONSIVE — MÓVIL / TABLET
+══════════════════════════════════════════════ */
+
+/* ── TABLET (≤1200px): compactar columnas ── */
+@media(max-width:1200px){
+  #lp{width:175px}
+  #rp{width:210px}
+  .ic-price{font-size:13px}
+  .ib-val{font-size:16px}
+}
+
+/* ── MÓVIL (≤768px): layout vertical completo ── */
+@media(max-width:768px){
+  html,body{overflow-x:hidden;overflow-y:hidden}
+
+  /* Header compacto en 2 filas */
+  #hdr{height:auto;min-height:50px;flex-wrap:wrap;padding:6px 10px;gap:6px}
+  .logo{font-size:14px;letter-spacing:3px}
+  .logo-sub{display:none}
+  .hdr-bal{padding:2px 8px}
+  .hdr-bal-val{font-size:12px}
+  #clock{font-size:12px;letter-spacing:2px;margin-left:4px}
+  .at-btn,.ops-hdr-btn{padding:3px 8px;font-size:7px}
+
+  /* Wrap vertical */
+  #wrap{flex-direction:column;height:calc(100vh - 44px);overflow:hidden}
+
+  /* LEFT → franja horizontal scroll con tarjetas en fila */
+  #lp{
+    width:100%;height:auto;flex-shrink:0;
+    flex-direction:row;overflow-x:auto;overflow-y:hidden;
+    padding:5px;gap:5px;border-right:none;
+    border-bottom:1px solid var(--border);
+  }
+  #lp::-webkit-scrollbar{height:3px}
+  #lp > div:first-child{display:none} /* ocultar label "ÍNDICES SINTÉTICOS" */
+
+  .idx-card{
+    min-width:130px;max-width:130px;flex-shrink:0;
+    padding:5px;
+  }
+  .idx-card::before{top:0;left:0;width:100%;height:3px} /* borde top en vez de left */
+  .ic-price{font-size:12px}
+  .ic-row{display:none} /* ocultar filas de z-dir y ticks/spike en tarjeta mini */
+  .ic-target{display:none}
+  .mini-bar{margin-top:3px}
+
+  /* CENTER: ocupa todo */
+  #cp{flex:1;min-height:0;padding:4px;gap:4px}
+
+  /* Tabs símbolo: scroll horizontal */
+  #symtabs{overflow-x:auto;flex-wrap:nowrap}
+  #symtabs::-webkit-scrollbar{height:2px}
+  .stb{padding:3px 7px;font-size:7px;letter-spacing:1px;white-space:nowrap}
+  .tfb{padding:2px 5px;font-size:7px}
+
+  /* Gráfico: altura mayor en móvil */
+  #chart-wrap{flex:1;min-height:180px}
+  .co-sym{font-size:13px;letter-spacing:1px}
+  .co-price{font-size:11px}
+  .chart-overlay{top:5px;left:6px}
+
+  /* Indicadores: 3 columnas en vez de 6 */
+  #ind-rows{gap:3px}
+  #ind-row1,#ind-row2{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    height:auto;gap:3px;
+  }
+  .ind-box{padding:4px;min-height:62px}
+  .ib-title{font-size:6px;letter-spacing:0;margin-bottom:2px}
+  .ib-val{font-size:14px}
+  .ib-val.sm{font-size:10px;margin-top:2px}
+  .ib-sub{font-size:7px}
+
+  /* Micro canvas más pequeño */
+  #micro-canvas{height:32px}
+
+  /* RIGHT → colapsado: se muestra como fila abajo del centro */
+  #rp{
+    width:100%;height:auto;flex-shrink:0;
+    flex-direction:row;flex-wrap:wrap;
+    border-left:none;border-top:1px solid var(--border);
+    padding:5px;gap:5px;overflow-y:visible;
+    max-height:120px;overflow-x:auto;
+  }
+  #rp .sec{flex:1;min-width:140px;padding:5px}
+  .stitle{font-size:7px;margin-bottom:4px}
+
+  /* Gauge más pequeño */
+  #gaugeCanvas{width:90px;height:52px}
+  #gauge-wrap{padding:2px 0}
+
+  /* HMM canvas */
+  #hmmCanvas{width:100%;height:45px}
+
+  /* Prob rows compactos */
+  .prob-row{margin-bottom:2px}
+  .pr-lbl{font-size:7px}.pr-val{font-size:10px}
+
+  /* Ops mini widget */
+  .ops-mini{gap:3px}
+  .om-item{padding:2px 4px;min-width:40px}
+  .om-lbl{font-size:6px}.om-val{font-size:11px}
+
+  /* Ocultar log spikes en móvil (poco espacio) */
+  #rp .sec:last-child{display:none}
+
+  /* Footer compacto */
+  #ftr{height:20px;font-size:7px;padding:0 6px}
+  #stbar{font-size:7px}
+
+  /* Modal responsivo */
+  .ops-modal-inner{inset:10px}
+  .ops-modal-hdr{padding:8px 10px}
+  .ops-modal-title{font-size:11px;letter-spacing:2px}
+  .ops-stats{padding:6px 8px;gap:4px}
+  .ops-stat{padding:3px 6px;min-width:60px}
+  .os-lbl{font-size:6px}.os-val{font-size:14px}
+  .ops-controls{padding:6px 8px;gap:5px}
+  .ops-ctrl-input{width:60px;font-size:10px}
+  .ops-table-wrap{padding:5px 8px}
+  table.ops-tbl th,table.ops-tbl td{font-size:8px;padding:4px}
+}
+
+/* ── MÓVIL MUY PEQUEÑO (≤480px) ── */
+@media(max-width:480px){
+  #lp{max-height:90px}
+  .idx-card{min-width:110px;max-width:110px}
+  #ind-row1,#ind-row2{grid-template-columns:repeat(3,1fr)}
+  .ib-val{font-size:12px}
+  .ib-val.sm{font-size:9px}
+  #rp{max-height:100px}
+  #gaugeCanvas{width:75px;height:44px}
+}
 </style>
 </head>
 <body>
