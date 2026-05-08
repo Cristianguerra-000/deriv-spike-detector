@@ -12,7 +12,7 @@ import {
 const APP_ID = 1089; // App ID público — el token NO se usa en el navegador
 const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
-// ---------- Estado medias ----------
+// ---------- Medias: siempre activas ----------
 const MA_CFG = [
   { key: "ema9",    label: "EMA 9",   color: "#4fc3f7", width: 1 },
   { key: "ema21",   label: "EMA 21",  color: "#ff7043", width: 1 },
@@ -22,10 +22,7 @@ const MA_CFG = [
   { key: "bbMid",   label: "BB mid",  color: "rgba(255,213,79,.25)", width: 1, dash: true },
   { key: "bbLower", label: "BB−",     color: "rgba(255,213,79,.45)", width: 1, dash: true },
 ];
-const maState = {
-  series: {},
-  visible: Object.fromEntries(MA_CFG.map((m) => [m.key, true])),
-};
+const maState = { series: {} };
 
 // ---------- Estado ----------
 const state = {
@@ -103,7 +100,6 @@ function buildChart() {
     state.chart.applyOptions({ width: $("#chart").clientWidth });
   });
   buildMASeries();
-  bindMAToggles();
 }
 
 // ---------- Medias especiales ----------
@@ -165,7 +161,6 @@ function buildMASeries() {
       priceLineVisible: false,
       crosshairMarkerVisible: false,
       title: label,
-      visible: maState.visible[key],
     });
   });
 }
@@ -183,19 +178,58 @@ function updateMAs() {
   maState.series.bbLower.setData(bb.lower);
 }
 
-function bindMAToggles() {
-  document.querySelectorAll(".ma-toggle").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.ma;
-      // BB toggle controla las 3 series juntas
-      const keys = key === "bb" ? ["bbUpper", "bbMid", "bbLower"] : [key];
-      const nowVisible = keys.some((k) => maState.visible[k]);
-      keys.forEach((k) => {
-        maState.visible[k] = !nowVisible;
-        if (maState.series[k]) maState.series[k].applyOptions({ visible: !nowVisible });
-      });
-      btn.classList.toggle("active", !nowVisible);
+// ---------- Fibonacci especial CRASH/BOOM ----------
+// Niveles estándar + niveles de extensión típicos de spikes sintéticos
+const FIB_LEVELS = [
+  { ratio: 0,     label: "0%",    color: "rgba(255,213,79,.9)",  width: 1 },
+  { ratio: 0.236, label: "23.6%", color: "rgba(255,213,79,.5)",  width: 1 },
+  { ratio: 0.382, label: "38.2%", color: "rgba(38,194,129,.75)", width: 1 },
+  { ratio: 0.5,   label: "50%",   color: "rgba(79,195,247,.9)",  width: 2 },
+  { ratio: 0.618, label: "61.8%", color: "rgba(38,194,129,.9)",  width: 2 },
+  { ratio: 0.786, label: "78.6%", color: "rgba(239,83,80,.6)",   width: 1 },
+  { ratio: 1,     label: "100%",  color: "rgba(255,213,79,.9)",  width: 1 },
+  // Extensiones para el target del spike
+  { ratio: 1.272, label: "127.2% ext", color: "rgba(206,147,216,.7)", width: 1 },
+  { ratio: 1.618, label: "161.8% ext", color: "rgba(206,147,216,.9)", width: 2 },
+];
+
+const fibLines = []; // array de price lines de fibonacci
+
+function clearFib() {
+  if (!state.candleSeries) return;
+  fibLines.forEach((pl) => { try { state.candleSeries.removePriceLine(pl); } catch (_) {} });
+  fibLines.length = 0;
+}
+
+function drawFib(symbol) {
+  clearFib();
+  if (!state.candles.length) return;
+  // No dibujar en símbolos que no sean crash/boom
+  if (!symbol || (!symbol.startsWith("CRASH") && !symbol.startsWith("BOOM"))) return;
+
+  const isCrash = symbol.startsWith("CRASH");
+  // Usamos las últimas 200 velas para definir swing high/low
+  const window = state.candles.slice(-200);
+  const swingHigh = Math.max(...window.map((c) => c.high));
+  const swingLow  = Math.min(...window.map((c) => c.low));
+  const range = swingHigh - swingLow;
+
+  FIB_LEVELS.forEach(({ ratio, label, color, width }) => {
+    // CRASH: retroceso desde arriba hacia abajo (spikes caen)
+    // BOOM:  retroceso desde abajo hacia arriba (spikes suben)
+    const price = isCrash
+      ? swingHigh - ratio * range
+      : swingLow  + ratio * range;
+
+    const pl = state.candleSeries.createPriceLine({
+      price,
+      color,
+      lineWidth: width,
+      lineStyle: 2,           // dashed para no confundir con medias
+      axisLabelVisible: true,
+      title: `Fib ${label}`,
     });
+    fibLines.push(pl);
   });
 }
 
@@ -290,6 +324,7 @@ async function loadCandles(symbol) {
   state.candleSeries.setData(candles);
   state.candles = candles;
   updateMAs();
+  drawFib(symbol);
   // Ajustar zoom para mostrar todo el histórico cargado
   state.chart.timeScale().fitContent();
   // Restaurar título con número de velas cargadas
@@ -332,6 +367,7 @@ async function loadAlgorithmResults(symbol) {
   grid.innerHTML = "";
   // Limpia zonas de la gráfica del símbolo anterior
   clearPriceLines();
+  clearFib();
 
   // Resetear panel de entrada
   const panel = $("#entryPanel");
