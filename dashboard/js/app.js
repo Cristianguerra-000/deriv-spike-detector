@@ -12,6 +12,21 @@ import {
 const APP_ID = 1089; // App ID público — el token NO se usa en el navegador
 const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
 
+// ---------- Estado medias ----------
+const MA_CFG = [
+  { key: "ema9",    label: "EMA 9",   color: "#4fc3f7", width: 1 },
+  { key: "ema21",   label: "EMA 21",  color: "#ff7043", width: 1 },
+  { key: "ema50",   label: "EMA 50",  color: "#ffd54f", width: 1 },
+  { key: "hull9",   label: "HULL 9",  color: "#ce93d8", width: 2 },
+  { key: "bbUpper", label: "BB+",     color: "rgba(255,213,79,.45)", width: 1, dash: true },
+  { key: "bbMid",   label: "BB mid",  color: "rgba(255,213,79,.25)", width: 1, dash: true },
+  { key: "bbLower", label: "BB−",     color: "rgba(255,213,79,.45)", width: 1, dash: true },
+];
+const maState = {
+  series: {},
+  visible: Object.fromEntries(MA_CFG.map((m) => [m.key, true])),
+};
+
 // ---------- Estado ----------
 const state = {
   ws: null,
@@ -86,6 +101,101 @@ function buildChart() {
   });
   window.addEventListener("resize", () => {
     state.chart.applyOptions({ width: $("#chart").clientWidth });
+  });
+  buildMASeries();
+  bindMAToggles();
+}
+
+// ---------- Medias especiales ----------
+function _ema(candles, period) {
+  if (candles.length < period) return [];
+  const k = 2 / (period + 1);
+  let v = candles.slice(0, period).reduce((s, c) => s + c.close, 0) / period;
+  const out = [{ time: candles[period - 1].time, value: v }];
+  for (let i = period; i < candles.length; i++) {
+    v = candles[i].close * k + v * (1 - k);
+    out.push({ time: candles[i].time, value: v });
+  }
+  return out;
+}
+
+function _wma(candles, period) {
+  const denom = period * (period + 1) / 2;
+  const out = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    let sum = 0;
+    for (let j = 0; j < period; j++) sum += candles[i - j].close * (period - j);
+    out.push({ time: candles[i].time, value: sum / denom, close: sum / denom });
+  }
+  return out;
+}
+
+function _hull(candles, period) {
+  // HMA(n) = WMA( 2*WMA(n/2) − WMA(n), sqrt(n) )
+  const half = Math.round(period / 2);
+  const sq   = Math.round(Math.sqrt(period));
+  const wFull = _wma(candles, period);
+  const wHalf = _wma(candles, half);
+  const offset = period - half;
+  const diff = wFull.map((p, i) => ({ time: p.time, close: 2 * wHalf[i + offset].value - p.value }));
+  return _wma(diff, sq).map((p) => ({ time: p.time, value: p.close }));
+}
+
+function _bb(candles, period = 20, mult = 2) {
+  const upper = [], mid = [], lower = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    const sl = candles.slice(i - period + 1, i + 1);
+    const mean = sl.reduce((s, c) => s + c.close, 0) / period;
+    const std  = Math.sqrt(sl.reduce((s, c) => s + (c.close - mean) ** 2, 0) / period);
+    upper.push({ time: candles[i].time, value: mean + mult * std });
+    mid.push(  { time: candles[i].time, value: mean });
+    lower.push({ time: candles[i].time, value: mean - mult * std });
+  }
+  return { upper, mid, lower };
+}
+
+function buildMASeries() {
+  Object.values(maState.series).forEach((s) => { try { state.chart.removeSeries(s); } catch (_) {} });
+  maState.series = {};
+  MA_CFG.forEach(({ key, label, color, width, dash }) => {
+    maState.series[key] = state.chart.addLineSeries({
+      color, lineWidth: width,
+      lineStyle: dash ? 2 : 0,
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+      title: label,
+      visible: maState.visible[key],
+    });
+  });
+}
+
+function updateMAs() {
+  const c = state.candles;
+  if (!c.length || !maState.series.ema9) return;
+  maState.series.ema9.setData(_ema(c, 9));
+  maState.series.ema21.setData(_ema(c, 21));
+  maState.series.ema50.setData(_ema(c, 50));
+  maState.series.hull9.setData(_hull(c, 9));
+  const bb = _bb(c, 20, 2);
+  maState.series.bbUpper.setData(bb.upper);
+  maState.series.bbMid.setData(bb.mid);
+  maState.series.bbLower.setData(bb.lower);
+}
+
+function bindMAToggles() {
+  document.querySelectorAll(".ma-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.ma;
+      // BB toggle controla las 3 series juntas
+      const keys = key === "bb" ? ["bbUpper", "bbMid", "bbLower"] : [key];
+      const nowVisible = keys.some((k) => maState.visible[k]);
+      keys.forEach((k) => {
+        maState.visible[k] = !nowVisible;
+        if (maState.series[k]) maState.series[k].applyOptions({ visible: !nowVisible });
+      });
+      btn.classList.toggle("active", !nowVisible);
+    });
   });
 }
 
@@ -179,6 +289,7 @@ async function loadCandles(symbol) {
   }));
   state.candleSeries.setData(candles);
   state.candles = candles;
+  updateMAs();
   // Ajustar zoom para mostrar todo el histórico cargado
   state.chart.timeScale().fitContent();
   // Restaurar título con número de velas cargadas
@@ -206,6 +317,7 @@ function onOhlc(ohlc) {
       if (state.candles.length > 5100) state.candles.shift();
     }
   }
+  updateMAs();
 }
 
 function onTick(_tick) { /* hook futuro */ }

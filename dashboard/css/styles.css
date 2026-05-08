@@ -268,3 +268,37 @@ html, body {
 .signal-badge.rango-amplio  { background: rgba(239,83,80,.2); color: #ef5350; }
 .signal-badge.rango-estrecho { background: rgba(255,213,79,.2); color: #ffd54f; }
 
+/* -------- Barra de Medias Móviles -------- */
+.ma-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  flex-wrap: wrap;
+}
+.ma-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-right: 2px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.ma-toggle {
+  background: transparent;
+  border: 1px solid var(--c, var(--border));
+  color: var(--c, var(--text-dim));
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 20px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity .2s, background .2s;
+  letter-spacing: .3px;
+}
+.ma-toggle.active {
+  background: color-mix(in srgb, var(--c, #fff) 18%, transparent);
+  opacity: 1;
+}
+.ma-toggle:hover { opacity: 1; }
+
