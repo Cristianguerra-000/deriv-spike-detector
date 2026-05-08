@@ -186,3 +186,85 @@ html, body {
   padding-top: 6px;
   margin-top: 2px;
 }
+
+/* -------- Panel de Entrada Fuerte -------- */
+.entry-panel {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  grid-template-rows: auto 6px;
+  align-items: center;
+  gap: 0 16px;
+  background: var(--bg-elev);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px 12px;
+  margin-bottom: 18px;
+  position: relative;
+  transition: border-color 0.4s, background 0.4s;
+}
+.entry-bar-wrap {
+  grid-column: 1 / -1;
+  height: 6px;
+  background: var(--bg-elev-2);
+  border-radius: 3px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+.entry-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease, background 0.4s;
+  background: var(--text-dim);
+}
+
+/* Estados */
+.entry-panel.entry-waiting  { border-color: var(--border); }
+.entry-panel.entry-strong   { border-color: #26c281; background: rgba(38,194,129,.06); }
+.entry-panel.entry-moderate { border-color: #ffd54f; background: rgba(255,213,79,.05); }
+.entry-panel.entry-weak     { border-color: #ef5350; background: rgba(239,83,80,.04); }
+
+.entry-panel.entry-strong   .entry-bar { background: #26c281; }
+.entry-panel.entry-moderate .entry-bar { background: #ffd54f; }
+.entry-panel.entry-weak     .entry-bar { background: var(--text-dim); }
+
+.entry-icon {
+  font-size: 32px;
+  text-align: center;
+  line-height: 1;
+}
+.entry-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.entry-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.entry-score {
+  text-align: right;
+}
+.entry-score span {
+  display: block;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.entry-score small {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Nuevas clases de badge para señales expandidas */
+.signal-badge.tendencia-alcista, .signal-badge.alcista-débil { background: rgba(38,166,154,.2); color: #26a69a; }
+.signal-badge.tendencia-bajista, .signal-badge.bajista-débil { background: rgba(239,83,80,.2); color: #ef5350; }
+.signal-badge.lateral, .signal-badge.equilibrado, .signal-badge.rango-normal { background: rgba(255,213,79,.2); color: #ffd54f; }
+.signal-badge.cuerpos-dominantes { background: rgba(79,195,247,.2); color: #4fc3f7; }
+.signal-badge.mechas-dominantes  { background: rgba(255,112,67,.2); color: #ff7043; }
+.signal-badge.rango-amplio  { background: rgba(239,83,80,.2); color: #ef5350; }
+.signal-badge.rango-estrecho { background: rgba(255,213,79,.2); color: #ffd54f; }
+
