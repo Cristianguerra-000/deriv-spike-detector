@@ -22,6 +22,8 @@ const state = {
   chart: null,
   candleSeries: null,
   tickSubId: null,
+  candles: [],          // últimas velas cargadas (para cálculos)
+  priceLines: [],       // referencias a las price lines dibujadas
 };
 
 // ---------- WS helpers ----------
@@ -176,6 +178,7 @@ async function loadCandles(symbol) {
     open: +c.open, high: +c.high, low: +c.low, close: +c.close,
   }));
   state.candleSeries.setData(candles);
+  state.candles = candles;
   // Ajustar zoom para mostrar todo el histórico cargado
   state.chart.timeScale().fitContent();
   // Restaurar título con número de velas cargadas
@@ -189,6 +192,20 @@ function onOhlc(ohlc) {
     time: +ohlc.open_time,
     open: +ohlc.open, high: +ohlc.high, low: +ohlc.low, close: +ohlc.close,
   });
+  // Actualizar última vela en cache
+  if (state.candles.length) {
+    const last = state.candles[state.candles.length - 1];
+    if (+ohlc.open_time === last.time) {
+      last.open = +ohlc.open; last.high = +ohlc.high;
+      last.low = +ohlc.low; last.close = +ohlc.close;
+    } else {
+      state.candles.push({
+        time: +ohlc.open_time,
+        open: +ohlc.open, high: +ohlc.high, low: +ohlc.low, close: +ohlc.close,
+      });
+      if (state.candles.length > 5100) state.candles.shift();
+    }
+  }
 }
 
 function onTick(_tick) { /* hook futuro */ }
@@ -201,6 +218,8 @@ async function loadAlgorithmResults(symbol) {
   while (resultUnsubs.length) resultUnsubs.pop()();
   const grid = $("#resultsGrid");
   grid.innerHTML = "";
+  // Limpia zonas de la gráfica del símbolo anterior
+  clearPriceLines();
 
   // Resetear panel de entrada
   const panel = $("#entryPanel");
@@ -295,6 +314,7 @@ function updateEntryPanel(symbol) {
   if (!isCrash && !isBoom) {
     // Símbolo no crash/boom → ocultar panel
     $("#entryPanel").className = "entry-panel entry-waiting";
+    clearPriceLines();
     return;
   }
 
@@ -334,6 +354,105 @@ function updateEntryPanel(symbol) {
     $("#entryTitle").textContent = "🚫 SEÑAL DÉBIL — No entrar aún";
     $("#entrySub").textContent = `Solo ${favor} de ${total} señales a favor. Las condiciones no son óptimas para ${dirLabel}.`;
   }
+
+  // Dibujar zonas en la gráfica
+  drawTradeZones(symbol, isCrash, pct);
+}
+
+// ---------- Zonas en la gráfica ----------
+function clearPriceLines() {
+  if (!state.candleSeries) return;
+  state.priceLines.forEach((pl) => {
+    try { state.candleSeries.removePriceLine(pl); } catch (_) {}
+  });
+  state.priceLines = [];
+}
+
+function drawTradeZones(symbol, isCrash, favorPct) {
+  clearPriceLines();
+  if (!state.candles.length) return;
+  // Tomar últimas 100 velas para definir el rango operativo
+  const window = state.candles.slice(-100);
+  const highs = window.map((c) => c.high);
+  const lows  = window.map((c) => c.low);
+  const recentHigh = Math.max(...highs);
+  const recentLow  = Math.min(...lows);
+  const range = recentHigh - recentLow;
+  const last  = state.candles[state.candles.length - 1].close;
+
+  // ATR aproximado (rango medio de las últimas 14 velas)
+  const atrWin = state.candles.slice(-14);
+  const atr = atrWin.reduce((s, c) => s + (c.high - c.low), 0) / Math.max(atrWin.length, 1);
+
+  // Color según fuerza de la señal
+  const strong   = favorPct >= 55;
+  const moderate = favorPct >= 35 && favorPct < 55;
+  const isFresh  = strong || moderate;
+
+  // ---- Zonas según tipo de índice ----
+  let entryPrice, targetPrice, stopPrice, safePrice;
+  let entryLabel, targetLabel, stopLabel, safeLabel;
+  let entryColor, targetColor, stopColor, safeColor;
+
+  if (isCrash) {
+    // CRASH: spike hacia ABAJO. Entrar VENTA cerca del techo, target abajo.
+    entryPrice  = recentHigh - atr * 0.3;       // zona de entrada (cerca del techo)
+    targetPrice = recentLow - atr * 0.5;        // objetivo del spike
+    stopPrice   = recentHigh + atr * 1.0;       // stop arriba del techo
+    safePrice   = recentLow + atr * 1.5;        // zona segura (lejos del techo)
+
+    entryLabel  = `🎯 ENTRADA VENTA ${entryPrice.toFixed(3)}`;
+    targetLabel = `💰 TARGET SPIKE ${targetPrice.toFixed(3)}`;
+    stopLabel   = `🛑 STOP ${stopPrice.toFixed(3)}`;
+    safeLabel   = `🛡️ ZONA SEGURA`;
+
+    entryColor  = strong ? "#ef5350" : (moderate ? "#ffd54f" : "#93a1b8");
+    targetColor = "#ef5350";
+    stopColor   = "#ff7043";
+    safeColor   = "#26c281";
+  } else {
+    // BOOM: spike hacia ARRIBA. Entrar COMPRA cerca del piso, target arriba.
+    entryPrice  = recentLow  + atr * 0.3;       // zona de entrada (cerca del piso)
+    targetPrice = recentHigh + atr * 0.5;       // objetivo del spike
+    stopPrice   = recentLow  - atr * 1.0;       // stop abajo del piso
+    safePrice   = recentHigh - atr * 1.5;       // zona segura (lejos del piso)
+
+    entryLabel  = `🎯 ENTRADA COMPRA ${entryPrice.toFixed(3)}`;
+    targetLabel = `💰 TARGET SPIKE ${targetPrice.toFixed(3)}`;
+    stopLabel   = `🛑 STOP ${stopPrice.toFixed(3)}`;
+    safeLabel   = `🛡️ ZONA SEGURA`;
+
+    entryColor  = strong ? "#26c281" : (moderate ? "#ffd54f" : "#93a1b8");
+    targetColor = "#26c281";
+    stopColor   = "#ff7043";
+    safeColor   = "#42a5f5";
+  }
+
+  const lineStyle = isFresh ? 0 : 2;   // 0=Solid, 2=Dashed
+  const lineWidth = strong ? 3 : 2;
+
+  const make = (price, color, title, style = lineStyle, width = 2) => {
+    const pl = state.candleSeries.createPriceLine({
+      price,
+      color,
+      lineWidth: width,
+      lineStyle: style,
+      axisLabelVisible: true,
+      title,
+    });
+    state.priceLines.push(pl);
+  };
+
+  // Línea de entrada (la más importante: marcada con grosor según fuerza)
+  make(entryPrice, entryColor, entryLabel, 0, lineWidth);
+  // Target del spike
+  make(targetPrice, targetColor, targetLabel, 2, 2);
+  // Stop loss
+  make(stopPrice, stopColor, stopLabel, 1, 2);     // 1=Dotted
+  // Zona segura (referencia opuesta)
+  make(safePrice, safeColor, safeLabel, 2, 1);
+  // Precio actual de referencia (sutil)
+  make(last, "#4fc3f7", `Actual ${last.toFixed(3)}`, 2, 1);
 }
 
 function formatValue(v) {
