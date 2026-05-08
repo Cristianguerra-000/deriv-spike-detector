@@ -283,6 +283,10 @@ class IndexState:
         self._pattern_update_tick = 0
         self.pattern_window = 15
 
+        # Velas OHLC de 1 minuto para el chart (hasta 1500 velas = 25h)
+        self.candles_1m: List[dict] = []
+        self._current_candle: Optional[dict] = None
+
         self.bounce_zones        = []
         self._bounce_update_tick = 0
 
@@ -726,6 +730,33 @@ class DerivEngine:
                 except Exception as e:
                     log.warning(f"Error cargando historial {symbol}: {e}")
 
+            # ── Cargar velas OHLC de 1 minuto para el chart ───────────
+            for symbol in INDICES:
+                try:
+                    await ws.send(json.dumps({
+                        "ticks_history": symbol,
+                        "count": 1500,
+                        "end": "latest",
+                        "style": "candles",
+                        "granularity": 60
+                    }))
+                    candle_resp = json.loads(await ws.recv())
+                    if candle_resp.get("msg_type") == "candles":
+                        candles = candle_resp.get("candles", [])
+                        self.states[symbol].candles_1m = [
+                            {
+                                "time":  int(c["epoch"]),
+                                "open":  float(c["open"]),
+                                "high":  float(c["high"]),
+                                "low":   float(c["low"]),
+                                "close": float(c["close"]),
+                            }
+                            for c in candles
+                        ]
+                        log.info(f"Velas 1m cargadas: {symbol} ({len(candles)} velas)")
+                except Exception as e:
+                    log.warning(f"Error cargando velas {symbol}: {e}")
+
             for symbol in INDICES:
                 await ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
                 log.info(f"Suscrito a {symbol}")
@@ -736,17 +767,42 @@ class DerivEngine:
                     tick = data["tick"]
                     sym  = tick["symbol"]
                     if sym in self.states:
-                        analysis   = self.states[sym].push_tick(
-                            float(tick["quote"]),
-                            int(tick["epoch"])
-                        )
+                        price = float(tick["quote"])
+                        epoch = int(tick["epoch"])
+                        state = self.states[sym]
+                        analysis = state.push_tick(price, epoch)
+
+                        # ── Actualizar vela 1m en vivo ─────────────────
+                        bucket = (epoch // 60) * 60
+                        cc = state._current_candle
+                        if cc is None or cc["time"] != bucket:
+                            # Cerrar la anterior, abrir nueva
+                            if cc is not None:
+                                # Asegurar que está en la lista
+                                if not state.candles_1m or state.candles_1m[-1]["time"] != cc["time"]:
+                                    state.candles_1m.append(cc)
+                                    if len(state.candles_1m) > 1500:
+                                        state.candles_1m = state.candles_1m[-1500:]
+                            new_candle = {"time": bucket, "open": price, "high": price, "low": price, "close": price}
+                            state._current_candle = new_candle
+                            state.candles_1m.append(new_candle)
+                            if len(state.candles_1m) > 1500:
+                                state.candles_1m = state.candles_1m[-1500:]
+                        else:
+                            cc["high"]  = max(cc["high"], price)
+                            cc["low"]   = min(cc["low"],  price)
+                            cc["close"] = price
+
+                        live_candle = state._current_candle
+
                         entered_op = self.ops.try_enter(analysis)
                         closed_ops = self.ops.check_exits(analysis)
 
                         payload: dict = {
-                            "type": "tick",
-                            "data": analysis,
-                            "ops":  self.ops.status_dict(),
+                            "type":   "tick",
+                            "data":   analysis,
+                            "ops":    self.ops.status_dict(),
+                            "candle": live_candle,  # Vela 1m en vivo
                         }
                         if entered_op:
                             payload["new_op"] = entered_op.to_dict()
@@ -788,9 +844,8 @@ async def ws_endpoint(websocket: WebSocket):
                 "target_dir": state.target_dir,
                 "price":      list(state.prices)[-1] if state.prices else 0,
                 "total_spikes": len(state.spikes),
-                # Últimos 2000 precios para poblar el chart histórico
-                "history_prices": list(state.prices)[-2000:],
-                "history_epochs": list(state.tick_times)[-2000:],
+                # Velas OHLC de 1 minuto para chart profesional
+                "candles_1m": state.candles_1m[-1500:],
             }
         await websocket.send_text(json.dumps({
             "type": "init",

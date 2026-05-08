@@ -702,8 +702,9 @@ const INDICES_META = {
   "CRASH1000": {name:"Crash 1000", type:"crash", freq:1000, col:"#ff8a80", dir:"DOWN"},
 };
 
-// Velas por número de ticks (tick-candles, ideal para sintéticos)
-const TICKFRAMES = {'T1':1,'T5':5,'T10':10,'T20':20,'T50':50,'T100':100};
+// Velas reales OHLC de 1 minuto agregadas en mayor TF
+// El backend envía velas de 1m; aquí las agregamos según el TF seleccionado
+const TIMEFRAMES = {'1m':1,'5m':5,'15m':15,'30m':30,'1H':60,'4H':240};
 const HMM_STATES = [
   {n:'ACUMULACIÓN',  col:'#ff9100'},
   {n:'TENDENCIA',    col:'#00c8ff'},
@@ -711,7 +712,7 @@ const HMM_STATES = [
 ];
 
 let currentSym  = "BOOM500";
-let currentTF   = 'T10';  // default: 1 vela cada 10 ticks
+let currentTF   = '1m';  // velas de 1 minuto profesionales
 let charts      = {};
 let lastData    = {};
 let opsData     = {};
@@ -777,7 +778,7 @@ function buildTabs(){
 
 function buildTFTabs(){
   const c = document.getElementById('tftabs');
-  Object.keys(TICKFRAMES).forEach(tf=>{
+  Object.keys(TIMEFRAMES).forEach(tf=>{
     const b = document.createElement('button');
     b.className = 'tfb' + (tf === currentTF ? ' on' : '');
     b.textContent = tf; b.id = 'tf-'+tf;
@@ -785,15 +786,45 @@ function buildTFTabs(){
       document.querySelectorAll('.tfb').forEach(x=>x.classList.remove('on'));
       b.classList.add('on');
       currentTF = tf;
-      // Reconstruir chart con nuevo timeframe
-      const sym = currentSym;
-      document.getElementById('chart').innerHTML = '';
-      Object.values(charts).forEach(c2=>{ try{ c2.chart.remove(); }catch(e){} });
-      charts = {};
-      buildChart(sym);
+      // Repintar el chart con el nuevo TF
+      repaintChart(currentSym);
     });
     c.appendChild(b);
   });
+}
+
+// Agrega velas de 1m en velas de N minutos
+function aggregateCandles(candles1m, tfMinutes){
+  if(tfMinutes <= 1) return candles1m.slice();
+  const tfSecs = tfMinutes * 60;
+  const map = new Map();
+  const order = [];
+  for(const c of candles1m){
+    const bucket = Math.floor(c.time / tfSecs) * tfSecs;
+    if(!map.has(bucket)){
+      map.set(bucket, {time:bucket, open:c.open, high:c.high, low:c.low, close:c.close});
+      order.push(bucket);
+    } else {
+      const a = map.get(bucket);
+      a.high  = Math.max(a.high, c.high);
+      a.low   = Math.min(a.low,  c.low);
+      a.close = c.close;
+    }
+  }
+  return order.map(b=>map.get(b));
+}
+
+// Repinta el chart desde lastData[sym].candles_1m
+function repaintChart(sym){
+  const ch = charts[sym];
+  if(!ch) return;
+  const symData = lastData[sym];
+  if(!symData || !symData.candles_1m || symData.candles_1m.length === 0) return;
+  const tfM = TIMEFRAMES[currentTF] || 1;
+  const candles = aggregateCandles(symData.candles_1m, tfM);
+  ch.series.setData(candles);
+  ch.currentBucket = candles.length ? candles[candles.length-1].time : null;
+  ch.currentCandle = candles.length ? {...candles[candles.length-1]} : null;
 }
 
 // ─── CHART ───────────────────────────────────────────────────
@@ -804,35 +835,32 @@ function buildChart(sym){
   const chart = LightweightCharts.createChart(container, {
     width:  container.clientWidth,
     height: container.clientHeight,
-    layout:{ background:{color:'#020810'}, textColor:'#7ab8c8' },
+    layout:{ background:{color:'#020810'}, textColor:'#7ab8c8', fontSize:10, fontFamily:'Courier New' },
     grid:{
-      vertLines:{color:'rgba(0,200,255,.05)'},
+      vertLines:{color:'rgba(0,200,255,.04)'},
       horzLines:{color:'rgba(0,200,255,.05)'},
     },
     crosshair:{ mode:LightweightCharts.CrosshairMode.Normal },
     timeScale:{
       borderColor:'rgba(0,200,255,.2)',
-      timeVisible:false, barSpacing:4, minBarSpacing:1,
-      rightOffset:6, fixLeftEdge:false, lockVisibleTimeRangeOnResize:true,
+      timeVisible:true, secondsVisible:false,
+      barSpacing:3, minBarSpacing:1, rightOffset:8,
+      lockVisibleTimeRangeOnResize:true,
     },
     rightPriceScale:{ borderColor:'rgba(0,200,255,.2)', scaleMargins:{top:0.08,bottom:0.08} },
   });
 
   const series = chart.addCandlestickSeries({
-    upColor:         meta.type === 'boom' ? '#00e676' : '#ff1744',
-    downColor:       meta.type === 'boom' ? '#00695c' : '#b71c1c',
-    borderUpColor:   meta.type === 'boom' ? '#00e676' : '#ff1744',
-    borderDownColor: meta.type === 'boom' ? '#00695c' : '#b71c1c',
-    wickUpColor:     meta.type === 'boom' ? '#00e676' : '#ff1744',
-    wickDownColor:   meta.type === 'boom' ? '#00695c' : '#b71c1c',
+    upColor:         meta.type === 'boom' ? '#00e676' : '#ff5252',
+    downColor:       meta.type === 'boom' ? '#1b5e20' : '#b71c1c',
+    borderUpColor:   meta.type === 'boom' ? '#00e676' : '#ff5252',
+    borderDownColor: meta.type === 'boom' ? '#1b5e20' : '#b71c1c',
+    wickUpColor:     meta.type === 'boom' ? '#00e676' : '#ff5252',
+    wickDownColor:   meta.type === 'boom' ? '#1b5e20' : '#b71c1c',
     priceLineVisible: false, lastValueVisible: true,
   });
-  const filtSeries = chart.addLineSeries({
-    color:'rgba(224,64,251,.45)', lineWidth:1, priceLineVisible:false,
-    lineStyle:LightweightCharts.LineStyle.Dashed,
-  });
 
-  charts[sym] = { chart, series, filtSeries, markers:[], currentCandle:null };
+  charts[sym] = { chart, series, markers:[], currentCandle:null, currentBucket:null };
 
   new ResizeObserver(()=>{
     chart.applyOptions({ width:container.clientWidth, height:container.clientHeight });
@@ -850,31 +878,7 @@ function switchSym(sym){
   charts = {};
   buildChart(sym);
   microBuf = [];
-  // Cargar historial del símbolo seleccionado
-  const symData = lastData[sym];
-  if(symData && symData.history_prices && symData.history_prices.length > 1){
-    const ch = charts[sym];
-    if(ch){
-      const prices = symData.history_prices;
-      const tpb    = TICKFRAMES[currentTF] || 10;
-      const candleMap = new Map();
-      prices.forEach((price, i) => {
-        const bucket = Math.floor(i / tpb);
-        if(!candleMap.has(bucket)){
-          candleMap.set(bucket, {time:bucket, bucket, open:price, high:price, low:price, close:price});
-        } else {
-          const c2 = candleMap.get(bucket);
-          c2.high  = Math.max(c2.high, price); c2.low = Math.min(c2.low, price); c2.close = price;
-        }
-      });
-      const candles = Array.from(candleMap.values()).sort((a,b)=>a.time-b.time);
-      ch.series.setData(candles);
-      const lineMap = new Map();
-      prices.forEach((p,i)=>{ const t=Math.floor(i/tpb); lineMap.set(t,{time:t,value:p}); });
-      ch.filtSeries.setData(Array.from(lineMap.values()).sort((a,b)=>a.time-b.time));
-      ch.currentCandle = candles[candles.length-1] || null;
-    }
-  }
+  repaintChart(sym);
   updateOverlay(lastData[sym] || null);
 }
 
@@ -1289,37 +1293,7 @@ function connect(){
     if(msg.type === 'init'){
       Object.entries(msg.data).forEach(([sym,d])=>{ lastData[sym]=d; });
       buildChart(currentSym);
-      // Pintar historial en el chart
-      const symData = msg.data[currentSym];
-      if(symData && symData.history_prices && symData.history_prices.length > 1){
-        const ch = charts[currentSym];
-        if(ch){
-          const prices  = symData.history_prices;
-          const tpb     = TICKFRAMES[currentTF] || 10;
-          // Construir velas desde el historial
-          const candleMap = new Map();
-          prices.forEach((price, i) => {
-            const bucket = Math.floor(i / tpb);
-            if(!candleMap.has(bucket)){
-              candleMap.set(bucket, {time:bucket, bucket, open:price, high:price, low:price, close:price});
-            } else {
-              const c = candleMap.get(bucket);
-              c.high  = Math.max(c.high, price);
-              c.low   = Math.min(c.low,  price);
-              c.close = price;
-            }
-          });
-          const candles = Array.from(candleMap.values()).sort((a,b)=>a.time-b.time);
-          ch.series.setData(candles);
-          // Línea Kalman — usar precio directo como proxy
-          const lineData = prices.map((p,i)=>({time:Math.floor(i/tpb), value:p}));
-          // Deduplica por time (última)
-          const lineMap = new Map();
-          lineData.forEach(pt=>lineMap.set(pt.time, pt));
-          ch.filtSeries.setData(Array.from(lineMap.values()).sort((a,b)=>a.time-b.time));
-          ch.currentCandle = candles[candles.length-1] || null;
-        }
-      }
+      repaintChart(currentSym);
       if(msg.ops) updateOpsUI(msg.ops);
       return;
     }
@@ -1342,26 +1316,41 @@ function connect(){
       if(sym === currentSym){
         if(!charts[sym]) buildChart(sym);
         const ch = charts[sym];
-        if(ch){
-          // Tick-based candles: 1 vela cada N ticks
-          const ticksPerCandle = TICKFRAMES[currentTF] || 10;
-          // Usar contador global de ticks del símbolo como tiempo del chart
-          const tickNum  = d.tick || totalTicks;
-          const bucket   = Math.floor(tickNum / ticksPerCandle);  // índice de vela
-          if(!ch.currentCandle || ch.currentCandle.bucket !== bucket){
-            if(ch.currentCandle){
-              // Finalizar vela anterior
-              ch.series.update(ch.currentCandle);
+        if(ch && msg.candle){
+          // Mantener candles_1m actualizado en lastData
+          if(lastData[sym]){
+            const arr = lastData[sym].candles_1m || [];
+            if(arr.length === 0 || arr[arr.length-1].time !== msg.candle.time){
+              arr.push({...msg.candle});
+              if(arr.length > 1500) arr.splice(0, arr.length - 1500);
+            } else {
+              arr[arr.length-1] = {...msg.candle};
             }
-            ch.currentCandle = {time: bucket, bucket, open:d.price, high:d.price, low:d.price, close:d.price};
+            lastData[sym].candles_1m = arr;
+          }
+          // Calcular bucket del TF actual
+          const tfM    = TIMEFRAMES[currentTF] || 1;
+          const tfSecs = tfM * 60;
+          const bucket = Math.floor(msg.candle.time / tfSecs) * tfSecs;
+          if(ch.currentBucket !== bucket){
+            // Nueva vela del TF
+            ch.currentBucket = bucket;
+            ch.currentCandle = {
+              time:  bucket,
+              open:  msg.candle.open,
+              high:  msg.candle.high,
+              low:   msg.candle.low,
+              close: msg.candle.close,
+            };
+          } else if(ch.currentCandle){
+            ch.currentCandle.high  = Math.max(ch.currentCandle.high, msg.candle.high);
+            ch.currentCandle.low   = Math.min(ch.currentCandle.low,  msg.candle.low);
+            ch.currentCandle.close = msg.candle.close;
           } else {
-            ch.currentCandle.high  = Math.max(ch.currentCandle.high, d.price);
-            ch.currentCandle.low   = Math.min(ch.currentCandle.low,  d.price);
-            ch.currentCandle.close = d.price;
+            ch.currentCandle = {time:bucket, open:msg.candle.open, high:msg.candle.high, low:msg.candle.low, close:msg.candle.close};
           }
           ch.series.update(ch.currentCandle);
-          // Filtrado Kalman — una línea por tick (usar tickNum como tiempo)
-          ch.filtSeries.update({time: bucket, value: d.price_filtered});
+
           // Marcador spike — solo en dirección objetivo
           if(d.spike_detected && d.spike_in_target){
             const mkr = {

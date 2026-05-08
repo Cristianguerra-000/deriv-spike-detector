@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAMARITAN v3.0 — Sistema de Vigilancia Predictiva Global</title>
+<style>
+:root {
+  --bg:    #020408;
+  --bg2:   #050d1a;
+  --bg3:   #071526;
+  --cyan:  #00c8ff;
+  --cyan2: rgba(0,200,255,0.12);
+  --cyan3: rgba(0,200,255,0.25);
+  --red:   #ff2a2a;
+  --red2:  rgba(255,42,42,0.15);
+  --green: #00ff65;
+  --orange:#ff8800;
+  --txt:   #7ab8c8;
+  --dim:   #2e5060;
+  --bright:#e0f0ff;
+  --border:rgba(0,200,255,0.22);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:var(--bg);color:var(--txt);
+  font-family:'Courier New',monospace;font-size:11px;overflow:hidden}
+
+/* scanlines */
+body::before{content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(to bottom,transparent 0,transparent 1px,rgba(0,0,0,.07) 1px,rgba(0,0,0,.07) 2px);
+  pointer-events:none;z-index:9998}
+/* vignette */
+body::after{content:'';position:fixed;inset:0;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.65) 100%);
+  pointer-events:none;z-index:9997}
+
+/* background canvas (matrix) */
+#bgc{position:fixed;inset:0;z-index:0;opacity:.07;pointer-events:none}
+
+#app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;width:100vw}
+
+/* ── HEADER ── */
+#hdr{flex-shrink:0;height:52px;
+  background:linear-gradient(90deg,#020d1f,#041a35,#020d1f);
+  border-bottom:1px solid var(--cyan);
+  display:flex;align-items:center;padding:0 14px;gap:16px;
+  position:relative;overflow:hidden}
+#hdr::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  box-shadow:0 0 14px var(--cyan)}
+
+.logo{font-size:21px;font-weight:bold;letter-spacing:8px;color:var(--cyan);
+  text-shadow:0 0 18px var(--cyan),0 0 36px rgba(0,200,255,.3);line-height:1}
+.logo-sub{font-size:7px;letter-spacing:3px;color:var(--dim);margin-top:2px}
+
+.tabs{display:flex;gap:3px;flex:1;justify-content:center}
+.tbtn{background:transparent;border:1px solid var(--border);color:var(--dim);
+  padding:5px 13px;font-family:inherit;font-size:9px;letter-spacing:2px;
+  cursor:pointer;transition:all .2s;text-transform:uppercase}
+.tbtn:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan2)}
+.tbtn.on{border-color:var(--cyan);color:var(--bright);background:rgba(0,200,255,.1);
+  box-shadow:0 0 10px rgba(0,200,255,.18)}
+.tbtn.on::after{content:'';display:block;height:2px;background:var(--cyan);
+  position:absolute;bottom:-1px;left:0;right:0}
+.tbtn{position:relative}
+
+.hdr-r{display:flex;flex-direction:column;align-items:flex-end;min-width:175px;gap:3px}
+.sys-on{display:flex;align-items:center;gap:6px;font-size:8px;letter-spacing:2px;color:var(--green)}
+.pdot{width:7px;height:7px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 8px var(--green);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.65)}}
+#clock{font-size:17px;color:var(--bright);letter-spacing:3px;font-weight:bold}
+
+/* ── BODY ── */
+#body{flex:1;display:flex;overflow:hidden}
+
+/* ── LEFT ── */
+#lp{width:195px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;gap:6px;overflow-y:auto;padding:8px}
+#lp::-webkit-scrollbar{width:3px}
+#lp::-webkit-scrollbar-thumb{background:rgba(0,200,255,.2)}
+
+.sec{border:1px solid var(--border);padding:8px;background:rgba(0,200,255,.02);position:relative}
+.sec::before{content:'';position:absolute;top:0;left:0;width:8px;height:8px;
+  border-top:1px solid var(--cyan);border-left:1px solid var(--cyan)}
+.sec::after{content:'';position:absolute;bottom:0;right:0;width:8px;height:8px;
+  border-bottom:1px solid var(--cyan);border-right:1px solid var(--cyan)}
+.stitle{font-size:8px;letter-spacing:3px;color:var(--cyan);margin-bottom:7px;text-transform:uppercase}
+
+.mrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.ml{color:var(--dim);font-size:9px}.mv{color:var(--bright);font-size:9px;font-weight:bold}
+.bar{background:rgba(0,200,255,.1);height:4px;border-radius:2px;margin-bottom:7px;overflow:hidden}
+.bf{height:100%;background:linear-gradient(90deg,var(--cyan),rgba(0,200,255,.4));
+  border-radius:2px;transition:width .8s ease;box-shadow:0 0 5px var(--cyan)}
+
+.si{display:flex;justify-content:space-between;padding:3px 0;
+  border-bottom:1px solid rgba(0,200,255,.05)}
+.sn{color:var(--cyan);font-size:12px;font-weight:bold}
+
+.ai{display:flex;align-items:flex-start;gap:5px;padding:4px 0;
+  border-bottom:1px solid rgba(255,42,42,.08)}
+.adot{width:6px;height:6px;border-radius:50%;background:var(--red);flex-shrink:0;
+  margin-top:2px;animation:pulse 1s ease infinite}
+.atxt{font-size:9px;color:rgba(255,120,120,.9);line-height:1.3}
+
+#pred-txt{font-size:9px;color:var(--dim);line-height:1.6}
+
+/* ── CENTER ── */
+#cp{flex:1;overflow:hidden;position:relative}
+.tc{display:none;width:100%;height:100%}
+.tc.on{display:flex;flex-direction:column}
+
+/* cameras */
+#tab-cam{padding:7px}
+#cgrid{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:5px;height:100%}
+.ccell{position:relative;background:#000;border:1px solid rgba(0,200,255,.18);overflow:hidden;cursor:pointer}
+.ccell:hover{border-color:var(--cyan)}
+.ccell canvas{width:100%;height:100%;display:block}
+.cov{position:absolute;inset:0;pointer-events:none}
+.cid{position:absolute;top:5px;left:6px;font-size:9px;color:var(--cyan);
+  text-shadow:0 0 6px var(--cyan);letter-spacing:1px}
+.cloc{position:absolute;top:5px;right:6px;font-size:8px;color:var(--dim)}
+.ctim{position:absolute;bottom:5px;left:6px;font-size:8px;color:var(--dim)}
+.crec{position:absolute;bottom:5px;right:6px;font-size:8px;color:var(--red)}
+.crec::before{content:'● ';animation:blink 1s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.corner{position:absolute;width:10px;height:10px}
+.tl{top:0;left:0;border-top:1px solid var(--cyan);border-left:1px solid var(--cyan)}
+.tr{top:0;right:0;border-top:1px solid var(--cyan);border-right:1px solid var(--cyan)}
+.bl{bottom:0;left:0;border-bottom:1px solid var(--cyan);border-left:1px solid var(--cyan)}
+.br{bottom:0;right:0;border-bottom:1px solid var(--cyan);border-right:1px solid var(--cyan)}
+
+.dbox{position:absolute;border:1.5px solid;pointer-events:none}
+.dbox.hi{border-color:var(--red);box-shadow:0 0 8px rgba(255,42,42,.45)}
+.dbox.md{border-color:var(--orange)}
+.dbox.lo{border-color:var(--green)}
+.dlbl{position:absolute;top:-17px;left:0;font-size:8px;white-space:nowrap;
+  background:rgba(0,0,0,.75);padding:1px 4px}
+.dbox.hi .dlbl{color:var(--red)}.dbox.md .dlbl{color:var(--orange)}.dbox.lo .dlbl{color:var(--green)}
+
+/* network */
+#tab-net{padding:7px}
+#netc{width:100%;height:100%;display:block}
+
+/* threats */
+#tab-thr{padding:8px;overflow-y:auto}
+#tab-thr::-webkit-scrollbar{width:4px}
+#tab-thr::-webkit-scrollbar-thumb{background:rgba(0,200,255,.2)}
+#tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:7px}
+.tcard{border:1px solid;padding:10px;position:relative;transition:transform .2s;cursor:pointer}
+.tcard:hover{transform:translateY(-2px)}
+.tcard.hi{border-color:rgba(255,42,42,.5);background:rgba(255,42,42,.04)}
+.tcard.md{border-color:rgba(255,136,0,.5);background:rgba(255,136,0,.04)}
+.tcard.lo{border-color:rgba(0,255,101,.5);background:rgba(0,255,101,.04)}
+.tcard::before{content:'';position:absolute;top:0;left:0;width:8px;height:8px;border-top:1px solid;border-left:1px solid}
+.tcard.hi::before{border-color:var(--red)}.tcard.md::before{border-color:var(--orange)}.tcard.lo::before{border-color:var(--green)}
+.cav{width:44px;height:44px;background:var(--bg3);border:1px solid var(--border);
+  margin-bottom:8px;display:flex;align-items:center;justify-content:center;
+  font-size:18px;color:var(--dim);position:relative;overflow:hidden}
+.cav::after{content:'';position:absolute;left:0;right:0;height:2px;background:rgba(0,200,255,.4);animation:scanv 1.8s linear infinite}
+@keyframes scanv{0%{top:0}100%{top:100%}}
+.cid2{font-size:8px;color:var(--dim)}
+.cname{font-size:12px;color:var(--bright);font-weight:bold;margin:2px 0}
+.ccat{font-size:8px;letter-spacing:1px}
+.ccat.hi{color:var(--red)}.ccat.md{color:var(--orange)}.ccat.lo{color:var(--green)}
+.tmeter{display:flex;align-items:center;gap:6px;margin-top:7px}
+.tbar{flex:1;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
+.tfill{height:100%;border-radius:2px;transition:width 1.2s ease}
+.tfill.hi{background:linear-gradient(90deg,#ff2a2a,#ff7777)}
+.tfill.md{background:linear-gradient(90deg,#ff8800,#ffcc00)}
+.tfill.lo{background:linear-gradient(90deg,#00ff65,#00cc44)}
+.tscore{font-size:16px;font-weight:bold;min-width:35px;text-align:right}
+.tscore.hi{color:var(--red)}.tscore.md{color:var(--orange)}.tscore.lo{color:var(--green)}
+.cbts{display:flex;gap:4px;margin-top:8px}
+.cbt{flex:1;background:transparent;border:1px solid;font-family:inherit;font-size:8px;
+  letter-spacing:1px;padding:3px;cursor:pointer;text-transform:uppercase}
+.cbt.d{border-color:rgba(255,42,42,.4);color:rgba(255,100,100,.8)}
+.cbt.i{border-color:rgba(0,200,255,.3);color:rgba(0,200,255,.8)}
+.cbt:hover{background:rgba(0,200,255,.06)}
+
+/* analytics */
+#tab-ana{padding:7px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:7px}
+.apan{border:1px solid var(--border);background:rgba(0,200,255,.02);padding:9px;
+  position:relative;overflow:hidden}
+.apan::before,.apan::after{content:'';position:absolute;width:8px;height:8px}
+.apan::before{top:0;left:0;border-top:1px solid var(--cyan);border-left:1px solid var(--cyan)}
+.apan::after{bottom:0;right:0;border-bottom:1px solid var(--cyan);border-right:1px solid var(--cyan)}
+.atitle{font-size:8px;letter-spacing:2px;color:var(--cyan);margin-bottom:5px;text-transform:uppercase}
+.apan canvas{width:100%;height:calc(100% - 24px);display:block}
+
+/* map */
+#tab-map{padding:7px}
+#mapc{width:100%;height:100%;display:block}
+
+/* ── RIGHT ── */
+#rp{width:255px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden}
+#ts{flex:0 0 auto;padding:8px;border-bottom:1px solid var(--border)}
+.ti{display:flex;align-items:center;gap:7px;padding:5px;
+  border-bottom:1px solid rgba(0,200,255,.05);cursor:pointer;transition:background .15s}
+.ti:hover{background:rgba(0,200,255,.04)}
+.tr2{font-size:9px;color:var(--dim);min-width:18px}
+.tinfo{flex:1}.tname{font-size:11px;color:var(--bright)}.tmeta{font-size:8px;color:var(--dim)}
+.tthrt{font-size:14px;font-weight:bold;min-width:34px;text-align:right}
+
+#as{flex:1;padding:8px;overflow:hidden;display:flex;flex-direction:column}
+#alog{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+#alog::-webkit-scrollbar{width:3px}
+#alog::-webkit-scrollbar-thumb{background:rgba(0,200,255,.2)}
+.le{padding:4px 6px;border-left:2px solid;font-size:9px;line-height:1.4;
+  background:rgba(0,0,0,.25);animation:fadein .3s ease}
+@keyframes fadein{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
+.le.critical{border-color:var(--red)}.le.warning{border-color:var(--orange)}
+.le.info{border-color:var(--cyan)}.le.normal{border-color:var(--dim)}
+.lt{color:var(--dim);font-size:8px}.lm{color:var(--txt)}
+.lm.critical{color:rgba(255,120,120,.9)}.lm.warning{color:rgba(255,170,80,.9)}
+
+/* ── FOOTER ── */
+#ftr{height:26px;background:var(--bg2);border-top:1px solid var(--border);
+  display:flex;align-items:center;padding:0 12px;justify-content:space-between;
+  font-size:8px;color:var(--dim)}
+#stmsg{flex:1;text-align:center;overflow:hidden;white-space:nowrap}
+.fstat span{color:var(--cyan)}
+
+@keyframes glitch{
+  0%{clip-path:inset(80% 0 0 0);transform:translateX(-3px)}
+  20%{clip-path:inset(20% 0 60% 0);transform:translateX(3px)}
+  40%{clip-path:inset(60% 0 10% 0);transform:translateX(-2px)}
+  60%,100%{clip-path:inset(0);transform:none}
+}
+</style>
+</head>
+<body>
+<canvas id="bgc"></canvas>
+<div id="app">
+
+<!-- HEADER -->
+<header id="hdr">
+  <div>
+    <div class="logo">SAMARITAN</div>
+    <div class="logo-sub">SISTEMA DE VIGILANCIA PREDICTIVA GLOBAL — NIVEL 5 CLASIFICADO</div>
+  </div>
+  <nav class="tabs">
+    <button class="tbtn on" data-tab="cam">VIGILANCIA</button>
+    <button class="tbtn" data-tab="net">RED NEURONAL</button>
+    <button class="tbtn" data-tab="thr">AMENAZAS</button>
+    <button class="tbtn" data-tab="ana">ANÁLISIS</button>
+    <button class="tbtn" data-tab="map">MAPA GLOBAL</button>
+  </nav>
+  <div class="hdr-r">
+    <div class="sys-on"><div class="pdot"></div>SISTEMA EN LÍNEA — NODOS ACTIVOS</div>
+    <div id="clock">00:00:00</div>
+  </div>
+</header>
+
+<!-- BODY -->
+<div id="body">
+
+<!-- LEFT PANEL -->
+<aside id="lp">
+  <div class="sec">
+    <div class="stitle">⬡ ESTADO SISTEMA</div>
+    <div class="mrow"><span class="ml">PROCESADOR</span><span class="mv" id="cv">0%</span></div>
+    <div class="bar"><div class="bf" id="cb" style="width:0"></div></div>
+    <div class="mrow"><span class="ml">MEMORIA</span><span class="mv" id="mv">0%</span></div>
+    <div class="bar"><div class="bf" id="mb" style="width:0"></div></div>
+    <div class="mrow"><span class="ml">RED</span><span class="mv" id="nv">0 Gb/s</span></div>
+    <div class="bar"><div class="bf" id="nb" style="width:0"></div></div>
+    <div class="mrow"><span class="ml">NODOS ACTIVOS</span><span class="mv" id="ndv">0</span></div>
+  </div>
+  <div class="sec">
+    <div class="stitle">⬡ RESUMEN GLOBAL</div>
+    <div class="si"><span class="ml">MONITOREADOS</span><span class="sn" id="s1">0</span></div>
+    <div class="si"><span class="ml">AMENAZAS ACTIVAS</span><span class="sn" style="color:var(--red)" id="s2">0</span></div>
+    <div class="si"><span class="ml">ALERTAS HOY</span><span class="sn" id="s3">0</span></div>
+    <div class="si"><span class="ml">PRECISIÓN IA</span><span class="sn" id="s4">0%</span></div>
+    <div class="si"><span class="ml">CÁMARAS ACTIVAS</span><span class="sn" id="s5">0</span></div>
+    <div class="si"><span class="ml">INTERCEPTACIONES</span><span class="sn" id="s6">0</span></div>
+  </div>
+  <div class="sec">
+    <div class="stitle">⬡ ALERTAS CRÍTICAS</div>
+    <div id="crits"></div>
+  </div>
+  <div class="sec">
+    <div class="stitle">⬡ PREDICCIÓN IA</div>
+    <div id="pred-txt">Calculando modelo predictivo...</div>
+  </div>
+</aside>
+
+<!-- CENTER PANEL -->
+<main id="cp">
+  <div id="tab-cam" class="tc on"><div id="cgrid"></div></div>
+  <div id="tab-net" class="tc"><canvas id="netc"></canvas></div>
+  <div id="tab-thr" class="tc"><div id="tgrid"></div></div>
+  <div id="tab-ana" class="tc">
+    <div class="apan"><div class="atitle">DETECCIONES — ÚLTIMAS 24 HORAS</div><canvas id="ch1"></canvas></div>
+    <div class="apan"><div class="atitle">DISTRIBUCIÓN POR CATEGORÍA</div><canvas id="ch2"></canvas></div>
+    <div class="apan"><div class="atitle">NIVEL DE AMENAZA GLOBAL — TIEMPO REAL</div><canvas id="ch3"></canvas></div>
+    <div class="apan"><div class="atitle">ACTIVIDAD DE RED — TIEMPO REAL</div><canvas id="ch4"></canvas></div>
+  </div>
+  <div id="tab-map" class="tc"><canvas id="mapc"></canvas></div>
+</main>
+
+<!-- RIGHT PANEL -->
+<aside id="rp">
+  <div id="ts">
+    <div class="stitle" style="padding:6px 0">⬡ OBJETIVOS PRIORITARIOS</div>
+    <div id="tlist"></div>
+  </div>
+  <div id="as">
+    <div class="stitle" style="padding:4px 0 6px">⬡ ACTIVIDAD EN TIEMPO REAL</div>
+    <div id="alog"></div>
+  </div>
+</aside>
+
+</div><!-- /body -->
+
+<!-- FOOTER -->
+<footer id="ftr">
+  <div class="fstat">SAMARITAN <span>v3.0</span> | BUILD <span>2026.05.04</span></div>
+  <div id="stmsg">INICIALIZANDO SISTEMAS DE VIGILANCIA...</div>
+  <div class="fstat">DATOS: <span id="fdp">0 Tb</span> | NODOS: <span id="fnd">0</span></div>
+</footer>
+
+</div><!-- /app -->
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  SAMARITAN — Simulador de Vigilancia Predictiva
+//  Todos los datos son completamente ficticios
+// ══════════════════════════════════════════════════════════════
+
+// ─── UTILIDADES ──────────────────────────────────────────────
+const R  = (a,b) => Math.random()*(b-a)+a;
+const RI = (a,b) => Math.floor(R(a,b+1));
+const P  = arr  => arr[Math.floor(Math.random()*arr.length)];
+const CL = (v,a,b) => Math.max(a,Math.min(b,v));
+const P2 = n => String(n).padStart(2,'0');
+const TCL= s => s>=75?'hi':s>=45?'md':'lo';
+const TCOL=s => s>=75?'#ff2a2a':s>=45?'#ff8800':'#00ff65';
+
+// ─── BASE DE DATOS FICTICIA ───────────────────────────────────
+const PERSONS = [
+  {id:'POI-0047',name:'KOVAČ, A.',full:'ALEKSANDER KOVAČ',    age:34,th:92,cat:'TERRORISTA',       st:'ACTIVO',    cam:'CAM-047',cx:6 },
+  {id:'POI-0112',name:'CHEN, L.', full:'LI CHEN',             age:29,th:78,cat:'HACKTIVISTA',      st:'ACTIVO',    cam:'CAM-112',cx:7 },
+  {id:'POI-0089',name:'VARGA, M.',full:'MIHAIL VARGA',        age:45,th:85,cat:'CRIMEN ORG.',       st:'MONITOREADO',cam:'CAM-089',cx:5},
+  {id:'POI-0234',name:'REEVES, T.',full:'THOMAS REEVES',      age:38,th:31,cat:'NEUTRAL',          st:'OBSERVADO', cam:'CAM-234',cx:2 },
+  {id:'POI-0156',name:'SANTOS, I.',full:'ISABELA SANTOS',     age:27,th:67,cat:'INFILTRADA',        st:'ACTIVO',    cam:'CAM-156',cx:4 },
+  {id:'POI-0078',name:'MOROZOV, D.',full:'DMITRI MOROZOV',    age:52,th:88,cat:'AGENTE EXTRANJERO',st:'ACTIVO',    cam:'CAM-078',cx:8 },
+  {id:'POI-0301',name:'PARK, J.', full:'JIYEON PARK',         age:31,th:45,cat:'INVESTIGADORA',    st:'OBSERVADO', cam:'CAM-301',cx:3 },
+  {id:'POI-0067',name:'OKAFOR, E.',full:'EMEKA OKAFOR',       age:41,th:73,cat:'TRAFICANTE',       st:'ACTIVO',    cam:'CAM-067',cx:6 },
+  {id:'POI-0188',name:'SILVA, R.', full:'RAFAEL SILVA',       age:36,th:56,cat:'SOSPECHOSO',       st:'MONITOREADO',cam:'CAM-188',cx:2},
+  {id:'POI-0205',name:'NAZARI, F.',full:'FARIDEH NAZARI',     age:44,th:81,cat:'FINANCIERO ILEGAL',st:'ACTIVO',    cam:'CAM-205',cx:9 },
+  {id:'POI-0422',name:'TORRES, C.',full:'CARLOS TORRES',      age:33,th:22,cat:'CIVIL',            st:'OBSERVADO', cam:'CAM-422',cx:1 },
+  {id:'POI-0350',name:'WEBER, H.', full:'HANS WEBER',         age:58,th:96,cat:'TERRORISTA',       st:'ACTIVO',    cam:'CAM-350',cx:11},
+];
+
+const CAMS = [
+  {id:'CAM-047',loc:'DIST. FINANCIERO, NYC'},
+  {id:'CAM-112',loc:'AEROPUERTO JFK — T4'},
+  {id:'CAM-089',loc:'METRO L8 — BROOKLYN'},
+  {id:'CAM-234',loc:'CENTRAL PARK NORTE'},
+  {id:'CAM-156',loc:'PUERTO CONTAINER-7'},
+  {id:'CAM-078',loc:'CONSULADO — E.45th ST'},
+];
+
+const EVTS = [
+  {m:'Reconocimiento facial positivo: {N} en {C}',          lv:'critical'},
+  {m:'Patrón de movimiento anómalo detectado en {C}',        lv:'warning'},
+  {m:'Comunicación encriptada interceptada — origen desconocido',lv:'warning'},
+  {m:'Sujeto {N} ha abandonado zona de monitoreo',           lv:'info'},
+  {m:'Nueva conexión social detectada: {N} ↔ red criminal',  lv:'critical'},
+  {m:'Acceso no autorizado al nodo {C} — bloqueado',         lv:'critical'},
+  {m:'Análisis conductual completado — sector {Z}',          lv:'normal'},
+  {m:'Perfil actualizado: {N} — nivel de amenaza +{D}',      lv:'warning'},
+  {m:'Transacción financiera sospechosa vinculada a {N}',    lv:'warning'},
+  {m:'Escaneo de red completado — {K} nodos analizados',     lv:'normal'},
+  {m:'Probabilidad de incidente actualizada: {PCT}%',        lv:'info'},
+  {m:'Dispositivo de {N} geolocalizando en zona restringida',lv:'info'},
+  {m:'ALERTA: {N} a menos de 200m de objetivo de alto valor',lv:'critical'},
+  {m:'Red neuronal recalibrando modelos predictivos...',      lv:'normal'},
+  {m:'Intercepción completada — {K} paquetes analizados',    lv:'normal'},
+];
+
+const PREDS = [
+  'Alta probabilidad de incidente en sector financiero (87%)',
+  'Red de contactos activa — nodo central identificado',
+  'Patrón conductual: operativo activo con 94% de certeza',
+  'Preparativos logísticos detectados — ventana: 48-72h',
+  'Correlación entre {N} sujetos y evento "Proyecto Fenix"',
+  'Movimiento de activos financieros: $47M en cuentas camufladas',
+  'Sincronización de actividades entre 3 nodos confirmada',
+  'Umbral de alerta superado en zona portuaria norte',
+];
+
+const CALERTS = [
+  'WEBER, H. — proximidad a objetivo de alto valor',
+  'Protocolo FENIX activo — 3 participantes detectados',
+  'CAM-350 intentó ser comprometida externamente',
+  'Red criminal activa — 4 nodos sincronizados ahora',
+];
+
+const ZONES = ['ALFA','BETA','GAMMA','DELTA','OMEGA'];
+
+// ─── ESTADO GLOBAL ────────────────────────────────────────────
+let dataProcessed = 2847392;
+let activeNodes   = 1247;
+let alertsToday   = 347;
+let frames        = 0;
+
+// ─── RELOJ ────────────────────────────────────────────────────
+function updateClock(){
+  const n=new Date();
+  document.getElementById('clock').textContent=`${P2(n.getHours())}:${P2(n.getMinutes())}:${P2(n.getSeconds())}`;
+}
+setInterval(updateClock,1000); updateClock();
+
+// ─── TABS ─────────────────────────────────────────────────────
+document.querySelectorAll('.tbtn').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const t=b.dataset.tab;
+    document.querySelectorAll('.tbtn').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.tc').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById('tab-'+t).classList.add('on');
+    if(t==='net')  initNet();
+    if(t==='map')  initMap();
+    if(t==='ana')  initCharts();
+  });
+});
+
+// ─── MÉTRICAS ────────────────────────────────────────────────
+let cpuT=72,memT=58,netT=65,cpuC=0,memC=0,netC=0;
+
+function updateMetrics(){
+  cpuT = CL(cpuT+R(-4,4),45,95);
+  memT = CL(memT+R(-2,2),40,80);
+  netT = CL(netT+R(-6,6),20,92);
+  activeNodes = CL(activeNodes+RI(-2,4),1200,1310);
+  dataProcessed += RI(800,4500);
+  if(Math.random()<.08) alertsToday++;
+}
+setInterval(updateMetrics,2000);
+
+function renderMetrics(){
+  cpuC += (cpuT-cpuC)*.04; memC += (memT-memC)*.04; netC += (netT-netC)*.04;
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
+  const sw=(id,w)=>{const e=document.getElementById(id);if(e)e.style.width=w+'%'};
+  set('cv',Math.round(cpuC)+'%'); sw('cb',cpuC);
+  set('mv',Math.round(memC)+'%'); sw('mb',memC);
+  set('nv',(netC*.12).toFixed(1)+' Gb/s'); sw('nb',netC);
+  set('ndv',activeNodes.toLocaleString());
+  set('s1',(47829+RI(-3,3)).toLocaleString());
+  set('s2',PERSONS.filter(p=>p.th>=75).length);
+  set('s3',alertsToday.toLocaleString());
+  set('s4',(87+R(-1.5,1.5)).toFixed(1)+'%');
+  set('s5',(6247+RI(-4,4)).toLocaleString());
+  set('s6',(1834+RI(-2,3)).toLocaleString());
+  set('fdp',(dataProcessed/1e6).toFixed(2)+' Tb');
+  set('fnd',activeNodes.toLocaleString());
+}
+
+// ─── ALERTAS CRÍTICAS ─────────────────────────────────────────
+(function(){
+  const c=document.getElementById('crits');
+  c.innerHTML=CALERTS.map(a=>`<div class="ai"><div class="adot"></div><div class="atxt">${a}</div></div>`).join('');
+})();
+
+// ─── PREDICCIÓN ───────────────────────────────────────────────
+function updatePred(){
+  const p=P(PREDS).replace('{N}',RI(3,11));
+  document.getElementById('pred-txt').textContent=p;
+}
+setInterval(updatePred,7000); updatePred();
+
+// ─── OBJETIVOS ────────────────────────────────────────────────
+function renderTargets(){
+  const s=[...PERSONS].sort((a,b)=>b.th-a.th).slice(0,6);
+  document.getElementById('tlist').innerHTML=s.map((p,i)=>`
+    <div class="ti">
+      <div class="tr2">#${i+1}</div>
+      <div class="tinfo">
+        <div class="tname">${p.name}</div>
+        <div class="tmeta">${p.id} · ${p.cat}</div>
+      </div>
+      <div class="tthrt" style="color:${TCOL(p.th)}">${p.th}</div>
+    </div>`).join('');
+}
+renderTargets();
+
+// ─── LOG DE ACTIVIDAD ─────────────────────────────────────────
+function addLog(){
+  const e=P(EVTS), p=P(PERSONS), c=P(CAMS);
+  const msg=e.m
+    .replace('{N}',p.name)
+    .replace('{C}',c.id)
+    .replace('{Z}',P(ZONES))
+    .replace('{D}',RI(2,12))
+    .replace('{K}',(RI(10,99)*1000).toLocaleString())
+    .replace('{PCT}',RI(62,96));
+  const now=new Date();
+  const ts=`${P2(now.getHours())}:${P2(now.getMinutes())}:${P2(now.getSeconds())}`;
+  const log=document.getElementById('alog');
+  const div=document.createElement('div');
+  div.className=`le ${e.lv}`;
+  div.innerHTML=`<div class="lt">${ts}</div><div class="lm ${e.lv}">${msg}</div>`;
+  log.insertBefore(div,log.firstChild);
+  while(log.children.length>55) log.removeChild(log.lastChild);
+}
+setInterval(addLog,1700);
+for(let i=0;i<14;i++) addLog();
+
+// ─── STATUS BAR ───────────────────────────────────────────────
+const STATMSGS=[
+  'ANALIZANDO PATRONES DE CONDUCTA EN TIEMPO REAL...',
+  'CORRELACIONANDO DATOS DE 6,247 CÁMARAS ACTIVAS...',
+  'ACTUALIZANDO 47,829 PERFILES DE RIESGO...',
+  'ALGORITMOS PREDICTIVOS CALIBRADOS AL 98.7%...',
+  'INTERCEPTANDO COMUNICACIONES CIFRADAS — PROTOCOLO RSA-4096...',
+  'RED NEURONAL ACTIVA — 1,247 NODOS PROCESANDO...',
+  'ESCANEANDO ACTIVIDAD FINANCIERA IRREGULAR...',
+  'IDENTIFICACIÓN BIOMÉTRICA FACIAL — PRECISIÓN: 99.3%...',
+  'ANALIZANDO GRAFOS DE REDES SOCIALES — 2.3M DE CONEXIONES...',
+  'PROCESANDO DATOS SATELITALES EN TIEMPO REAL...',
+];
+let stIdx=0;
+setInterval(()=>{
+  document.getElementById('stmsg').textContent=STATMSGS[stIdx%STATMSGS.length];
+  stIdx++;
+},4200);
+
+// ─── TARJETAS DE AMENAZAS ─────────────────────────────────────
+function buildThreats(){
+  const sorted=[...PERSONS].sort((a,b)=>b.th-a.th);
+  document.getElementById('tgrid').innerHTML=sorted.map(p=>{
+    const c=TCL(p.th);
+    return `<div class="tcard ${c}">
+      <div class="cav">◈</div>
+      <div class="cid2">${p.id} · ${p.cam}</div>
+      <div class="cname">${p.full}</div>
+      <div class="ccat ${c}">${p.cat}</div>
+      <div style="font-size:8px;color:var(--dim);margin-top:3px">EDAD: ${p.age} · CONEXIONES: ${p.cx} · ${p.st}</div>
+      <div class="tmeter">
+        <div class="tbar"><div class="tfill ${c}" style="width:${p.th}%"></div></div>
+        <div class="tscore ${c}">${p.th}</div>
+      </div>
+      <div class="cbts">
+        <button class="cbt d">NEUTRALIZAR</button>
+        <button class="cbt i">VER PERFIL</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+buildThreats();
+
+// ─── BACKGROUND MATRIX ───────────────────────────────────────
+(function(){
+  const c=document.getElementById('bgc');
+  c.width=window.innerWidth; c.height=window.innerHeight;
+  const ctx=c.getContext('2d');
+  const cols=Math.floor(window.innerWidth/18);
+  const drops=new Array(cols).fill(1);
+  const chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%';
+  function draw(){
+    ctx.fillStyle='rgba(0,0,0,.05)';
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle='rgba(0,220,100,.35)';
+    ctx.font='12px Courier New';
+    drops.forEach((y,i)=>{
+      ctx.fillText(chars[Math.floor(Math.random()*chars.length)],i*18,y*18);
+      if(y*18>c.height && Math.random()>.975) drops[i]=0;
+      drops[i]++;
+    });
+  }
+  setInterval(draw,60);
+})();
+
+// ─── CÁMARAS ─────────────────────────────────────────────────
+const camObjects=[];
+
+function makeBuildings(W,H){
+  return Array.from({length:RI(3,6)},()=>({
+    x:R(-5,W-25), w:R(30,80), h:R(35,H*.55),
+    wins:Array.from({length:RI(6,18)},()=>({rx:R(.08,.88),ry:R(.06,.82),lit:Math.random()>.45}))
+  }));
+}
+
+function buildCamGrid(){
+  const g=document.getElementById('cgrid');
+  g.innerHTML='';
+  CAMS.forEach((loc,i)=>{
+    const cell=document.createElement('div'); cell.className='ccell';
+    const cv=document.createElement('canvas'); cv.width=320; cv.height=200;
+    cell.appendChild(cv);
+    const ov=document.createElement('div'); ov.className='cov';
+    ov.innerHTML=`<div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="cid">${loc.id}</div>
+      <div class="cloc">${loc.loc}</div>
+      <div class="ctim" id="ct${i}">--:--:--</div>
+      <div class="crec">REC</div>`;
+    cell.appendChild(ov);
+
+    const p=PERSONS[i%PERSONS.length];
+    const boxes=[];
+    const nb=RI(1,3);
+    for(let b=0;b<nb;b++){
+      const box=document.createElement('div');
+      const lv=b===0?TCL(p.th):'lo';
+      box.className=`dbox ${lv}`;
+      const lbl=document.createElement('div'); lbl.className='dlbl';
+      lbl.textContent=b===0?`${p.id} · ${p.th}% · ${p.st}`:'CIVIL · NEUTRO';
+      box.appendChild(lbl); ov.appendChild(box);
+      boxes.push({el:box,x:R(5,62),y:R(10,55),w:R(11,21),h:R(18,34),
+        vx:R(-.18,.18),vy:R(-.09,.09),lv});
+    }
+    g.appendChild(cell);
+    camObjects.push({cv,ctx:cv.getContext('2d'),W:320,H:200,boxes,
+      tel:null,scanY:0,buildings:makeBuildings(320,200)});
+  });
+  camObjects.forEach((cam,i)=>{ cam.tel=document.getElementById('ct'+i); });
+}
+
+function renderCam(cam){
+  const {ctx:c,W,H,boxes,buildings}=cam;
+  // dark bg
+  c.fillStyle='#050a0c'; c.fillRect(0,0,W,H);
+  // ground
+  c.fillStyle='#07121a'; c.fillRect(0,H*.58,W,H*.42);
+  // buildings
+  buildings.forEach(b=>{
+    c.fillStyle='#0c1c2a'; c.fillRect(b.x,H*.58-b.h,b.w,b.h);
+    b.wins.forEach(w=>{
+      if(w.lit){ c.fillStyle='rgba(200,220,255,.18)';
+        c.fillRect(b.x+b.w*w.rx,H*.58-b.h+b.h*w.ry,6,8); }
+    });
+  });
+  // silhouettes
+  boxes.forEach(box=>{
+    const px=box.x/100*W, py=box.y/100*H, pw=box.w/100*W, ph=box.h/100*H;
+    const col=box.lv==='hi'?'rgba(255,80,80,.55)':box.lv==='md'?'rgba(255,170,50,.45)':'rgba(80,220,120,.35)';
+    c.fillStyle=col;
+    c.fillRect(px+pw*.28,py+ph*.28,pw*.44,ph*.58);
+    c.beginPath(); c.ellipse(px+pw*.5,py+ph*.18,pw*.2,ph*.17,0,0,Math.PI*2); c.fill();
+  });
+  // scan sweep
+  cam.scanY=(cam.scanY+1)%H;
+  const sg=c.createLinearGradient(0,cam.scanY-14,0,cam.scanY+6);
+  sg.addColorStop(0,'transparent'); sg.addColorStop(.5,'rgba(0,220,255,.07)'); sg.addColorStop(1,'transparent');
+  c.fillStyle=sg; c.fillRect(0,cam.scanY-14,W,20);
+  // noise
+  if(Math.random()<.25){
+    const id=c.getImageData(0,0,W,H); const d=id.data;
+    for(let n=0;n<250;n++){ const idx=Math.floor(Math.random()*W*H)*4, v=Math.random()*50;
+      d[idx]+=v; d[idx+1]+=v; d[idx+2]+=v; }
+    c.putImageData(id,0,0);
+  }
+  // glitch
+  if(Math.random()<.015){
+    const gy=RI(0,H);
+    c.putImageData(c.getImageData(0,gy,W,2),RI(-4,4),gy);
+  }
+  // green night-vision tint
+  c.fillStyle='rgba(0,40,15,.12)'; c.fillRect(0,0,W,H);
+  // move boxes
+  boxes.forEach(box=>{
+    box.x=CL(box.x+box.vx,3,72); box.y=CL(box.y+box.vy,5,62);
+    if(box.x<=3||box.x>=72) box.vx*=-1;
+    if(box.y<=5||box.y>=62) box.vy*=-1;
+    box.el.style.cssText=`left:${box.x}%;top:${box.y}%;width:${box.w}%;height:${box.h}%`;
+  });
+  if(cam.tel){ const n=new Date(); cam.tel.textContent=`${P2(n.getHours())}:${P2(n.getMinutes())}:${P2(n.getSeconds())}`; }
+}
+
+// ─── RED NEURONAL ────────────────────────────────────────────
+let netCanvas, netCtx, netNodes=[], netEdges=[], netParts=[], netInited=false;
+
+function initNet(){
+  netCanvas=document.getElementById('netc'); if(!netCanvas) return;
+  const par=netCanvas.parentElement;
+  netCanvas.width=par.clientWidth; netCanvas.height=par.clientHeight;
+  netCtx=netCanvas.getContext('2d');
+  if(netInited) return; netInited=true;
+  const W=netCanvas.width, H=netCanvas.height;
+  const types=[
+    {t:'person', col:'#ff4444', ico:'◉', n:12},
+    {t:'server', col:'#00c8ff', ico:'▣',  n:6},
+    {t:'phone',  col:'#00ff88', ico:'◎',  n:8},
+    {t:'camera', col:'#ffaa00', ico:'⊙',  n:5},
+  ];
+  let id=0;
+  types.forEach(nt=>{
+    for(let i=0;i<nt.n;i++){
+      netNodes.push({id:id++,t:nt.t,col:nt.col,ico:nt.ico,
+        x:R(60,W-60),y:R(60,H-60),vx:R(-.25,.25),vy:R(-.25,.25),
+        r:R(11,20),lbl:nt.t==='person'?PERSONS[i%PERSONS.length].id:`${nt.t.toUpperCase()}-${String(id).padStart(3,'0')}`,
+        ph:R(0,Math.PI*2),active:Math.random()>.3});
+    }
+  });
+  for(let i=0;i<netNodes.length;i++){
+    for(let e=0;e<RI(1,4);e++){
+      const to=RI(0,netNodes.length-1);
+      if(to!==i) netEdges.push({f:i,t:to,act:Math.random()});
+    }
+  }
+}
+
+function renderNet(){
+  if(!netCtx) return;
+  const c=netCtx, W=netCanvas.width, H=netCanvas.height;
+  c.fillStyle='rgba(2,4,8,.3)'; c.fillRect(0,0,W,H);
+  // edges
+  netEdges.forEach(e=>{
+    const f=netNodes[e.f], t=netNodes[e.t]; if(!f||!t) return;
+    c.beginPath(); c.moveTo(f.x,f.y); c.lineTo(t.x,t.y);
+    c.strokeStyle=`rgba(0,200,255,${.04+e.act*.09})`; c.lineWidth=.5; c.stroke();
+  });
+  // spawn particles
+  if(Math.random()<.12 && netEdges.length){
+    const e=P(netEdges), f=netNodes[e.f], t=netNodes[e.t];
+    if(f&&t) netParts.push({fx:f.x,fy:f.y,tx:t.x,ty:t.y,prog:0,spd:R(.004,.009),col:f.col});
+  }
+  // particles
+  netParts=netParts.filter(p=>p.prog<1);
+  netParts.forEach(p=>{
+    p.prog+=p.spd;
+    const x=p.fx+(p.tx-p.fx)*p.prog, y=p.fy+(p.ty-p.fy)*p.prog;
+    c.beginPath(); c.arc(x,y,2.5,0,Math.PI*2);
+    c.fillStyle=p.col; c.fill();
+    const tx2=p.fx+(p.tx-p.fx)*Math.max(0,p.prog-.06), ty2=p.fy+(p.ty-p.fy)*Math.max(0,p.prog-.06);
+    c.beginPath(); c.moveTo(tx2,ty2); c.lineTo(x,y);
+    c.strokeStyle=p.col+'55'; c.lineWidth=1.2; c.stroke();
+  });
+  // nodes
+  netNodes.forEach(n=>{
+    n.x+=n.vx; n.y+=n.vy;
+    if(n.x<28||n.x>W-28) n.vx*=-1;
+    if(n.y<28||n.y>H-28) n.vy*=-1;
+    n.ph+=.045;
+    if(n.active){
+      c.beginPath(); c.arc(n.x,n.y,n.r+6+Math.sin(n.ph)*4,0,Math.PI*2);
+      c.strokeStyle=n.col+'28'; c.lineWidth=1; c.stroke();
+    }
+    c.beginPath(); c.arc(n.x,n.y,n.r,0,Math.PI*2);
+    const g=c.createRadialGradient(n.x-3,n.y-3,0,n.x,n.y,n.r);
+    g.addColorStop(0,n.col+'99'); g.addColorStop(1,n.col+'18');
+    c.fillStyle=g; c.fill();
+    c.strokeStyle=n.col; c.lineWidth=1; c.stroke();
+    c.fillStyle=n.col; c.font=`${n.r*.9}px Courier New`;
+    c.textAlign='center'; c.textBaseline='middle';
+    c.fillText(n.ico,n.x,n.y);
+    c.fillStyle='rgba(160,200,220,.65)'; c.font='8px Courier New';
+    c.fillText(n.lbl,n.x,n.y+n.r+10);
+  });
+  // leyenda
+  [['#ff4444','SUJETO'],['#00c8ff','SERVIDOR'],['#00ff88','DISPOSITIVO MÓVIL'],['#ffaa00','CÁMARA']].forEach((it,i)=>{
+    c.beginPath(); c.arc(18,18+i*18,5,0,Math.PI*2); c.fillStyle=it[0]; c.fill();
+    c.fillStyle='rgba(160,200,220,.75)'; c.font='8px Courier New'; c.textAlign='left';
+    c.fillText(it[1],28,22+i*18);
+  });
+}
+
+// ─── MAPA ────────────────────────────────────────────────────
+let mapCanvas, mapCtx, mapMarks=[], mapInited=false;
+
+function initMap(){
+  mapCanvas=document.getElementById('mapc'); if(!mapCanvas) return;
+  const par=mapCanvas.parentElement;
+  mapCanvas.width=par.clientWidth; mapCanvas.height=par.clientHeight;
+  mapCtx=mapCanvas.getContext('2d');
+  if(mapInited) return; mapInited=true;
+  const W=mapCanvas.width, H=mapCanvas.height;
+  PERSONS.forEach(p=>{
+    mapMarks.push({x:R(60,W-60),y:R(55,H-55),vx:R(-.2,.2),vy:R(-.15,.15),
+      p,trail:[],ph:R(0,Math.PI*2)});
+  });
+}
+
+function drawMap(){
+  if(!mapCtx) return;
+  const c=mapCtx, W=mapCanvas.width, H=mapCanvas.height;
+  c.fillStyle='rgba(2,8,16,.35)'; c.fillRect(0,0,W,H);
+  // grid
+  c.strokeStyle='rgba(0,100,140,.13)'; c.lineWidth=.5;
+  for(let x=0;x<W;x+=38){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,H); c.stroke(); }
+  for(let y=0;y<H;y+=38){ c.beginPath(); c.moveTo(0,y); c.lineTo(W,y); c.stroke(); }
+  // heat
+  mapMarks.forEach(m=>{
+    if(m.p.th>=75){
+      const r=65+Math.sin(m.ph)*8;
+      const g=c.createRadialGradient(m.x,m.y,0,m.x,m.y,r);
+      g.addColorStop(0,'rgba(255,42,42,.1)'); g.addColorStop(1,'transparent');
+      c.fillStyle=g; c.beginPath(); c.arc(m.x,m.y,r,0,Math.PI*2); c.fill();
+    }
+  });
+  // trails + markers
+  mapMarks.forEach(m=>{
+    m.trail.push({x:m.x,y:m.y});
+    if(m.trail.length>28) m.trail.shift();
+    if(m.trail.length>1){
+      c.beginPath(); c.moveTo(m.trail[0].x,m.trail[0].y);
+      m.trail.forEach(pt=>c.lineTo(pt.x,pt.y));
+      c.strokeStyle=TCOL(m.p.th)+'40'; c.lineWidth=1; c.stroke();
+    }
+    m.x+=m.vx; m.y+=m.vy;
+    if(m.x<18||m.x>W-18) m.vx*=-1;
+    if(m.y<18||m.y>H-18) m.vy*=-1;
+    m.ph+=.035;
+    const col=TCOL(m.p.th);
+    c.beginPath(); c.arc(m.x,m.y,10+Math.sin(m.ph)*3,0,Math.PI*2);
+    c.strokeStyle=col+'40'; c.lineWidth=1; c.stroke();
+    c.beginPath(); c.arc(m.x,m.y,5,0,Math.PI*2);
+    c.fillStyle=col; c.fill();
+    c.fillStyle='rgba(200,230,245,.9)'; c.font='8px Courier New'; c.textAlign='center';
+    c.fillText(m.p.id,m.x,m.y-15);
+    c.fillStyle=col+'cc'; c.fillText(m.p.th+'%',m.x,m.y-7);
+  });
+  c.fillStyle='rgba(0,200,255,.55)'; c.font='10px Courier New'; c.textAlign='left';
+  c.fillText('SEGUIMIENTO EN TIEMPO REAL — ZONA OPERACIONAL: NUEVA YORK / METRO ÁREA',15,20);
+  // brújula
+  const cx=W-38,cy=H-38;
+  c.strokeStyle='rgba(0,200,255,.35)'; c.lineWidth=1;
+  c.beginPath(); c.moveTo(cx,cy-14); c.lineTo(cx,cy+14); c.stroke();
+  c.beginPath(); c.moveTo(cx-14,cy); c.lineTo(cx+14,cy); c.stroke();
+  c.fillStyle='rgba(0,200,255,.8)'; c.font='8px Courier New'; c.textAlign='center';
+  c.fillText('N',cx,cy-17);
+}
+
+// ─── CHARTS ──────────────────────────────────────────────────
+let chartsInited=false;
+let tlData  = Array.from({length:24},()=>RI(5,42));
+const catData=[
+  {l:'TERRORISMO',  v:12, col:'#ff2a2a'},
+  {l:'CRIMEN ORG.', v:28, col:'#ff6600'},
+  {l:'ESPIONAJE',   v:18, col:'#ff00aa'},
+  {l:'HACKTIVISMO', v:22, col:'#00aaff'},
+  {l:'TRÁFICO',     v:15, col:'#ffaa00'},
+  {l:'OTROS',       v:8,  col:'#666'},
+];
+let thrHist = Array.from({length:60},()=>R(48,88));
+let netAct  = Array.from({length:60},()=>R(20,92));
+
+function initCharts(){
+  ['ch1','ch2','ch3','ch4'].forEach(id=>{
+    const cv=document.getElementById(id); if(!cv) return;
+    const par=cv.parentElement;
+    cv.width=par.clientWidth-18; cv.height=par.clientHeight-30;
+  });
+  chartsInited=true;
+}
+
+function drawBars(){
+  const cv=document.getElementById('ch1'); if(!cv) return;
+  const c=cv.getContext('2d'), W=cv.width, H=cv.height;
+  c.clearRect(0,0,W,H);
+  tlData.push(RI(5,42)); if(tlData.length>24) tlData.shift();
+  const mx=Math.max(...tlData);
+  const bw=W/tlData.length;
+  c.strokeStyle='rgba(0,200,255,.08)'; c.lineWidth=.5;
+  for(let i=0;i<=4;i++){ const y=H-(i/4)*H; c.beginPath(); c.moveTo(0,y); c.lineTo(W,y); c.stroke(); }
+  tlData.forEach((v,i)=>{
+    const bh=(v/mx)*H*.9, x=i*bw+1, y=H-bh;
+    const g=c.createLinearGradient(0,y,0,H);
+    g.addColorStop(0,'rgba(0,200,255,.85)'); g.addColorStop(1,'rgba(0,90,170,.25)');
+    c.fillStyle=g; c.fillRect(x,y,bw-2,bh);
+  });
+  c.fillStyle='rgba(0,200,255,.35)'; c.font='7px Courier New'; c.textAlign='center';
+  for(let i=0;i<tlData.length;i+=4){
+    const h=(new Date().getHours()-tlData.length+i+24)%24;
+    c.fillText(P2(h)+'h',i*bw+bw/2,H-2);
+  }
+}
+
+function drawPie(){
+  const cv=document.getElementById('ch2'); if(!cv) return;
+  const c=cv.getContext('2d'), W=cv.width, H=cv.height;
+  c.clearRect(0,0,W,H);
+  const cx=W*.35, cy=H/2, r=Math.min(cx,cy)*.82;
+  const total=catData.reduce((s,d)=>s+d.v,0);
+  let ang=-Math.PI/2;
+  catData.forEach(d=>{
+    const a=(d.v/total)*Math.PI*2;
+    c.beginPath(); c.moveTo(cx,cy); c.arc(cx,cy,r,ang,ang+a); c.closePath();
+    c.fillStyle=d.col+'99'; c.fill();
+    c.strokeStyle=d.col; c.lineWidth=1.5; c.stroke();
+    ang+=a;
+  });
+  c.beginPath(); c.arc(cx,cy,r*.48,0,Math.PI*2); c.fillStyle='#050a14'; c.fill();
+  c.fillStyle='rgba(0,200,255,.9)'; c.font='bold 13px Courier New';
+  c.textAlign='center'; c.textBaseline='middle'; c.fillText(total,cx,cy-4);
+  c.font='7px Courier New'; c.fillStyle='rgba(100,180,200,.55)'; c.fillText('TOTAL',cx,cy+9);
+  c.textBaseline='alphabetic';
+  const lx=W*.64, ly=(H-catData.length*16)/2;
+  catData.forEach((d,i)=>{
+    c.fillStyle=d.col; c.fillRect(lx,ly+i*16,9,8);
+    c.fillStyle='rgba(160,200,220,.8)'; c.font='8px Courier New'; c.textAlign='left';
+    c.fillText(`${d.l} (${d.v}%)`,lx+13,ly+i*16+8);
+  });
+}
+
+function drawLine(id,data,col){
+  const cv=document.getElementById(id); if(!cv) return;
+  const c=cv.getContext('2d'), W=cv.width, H=cv.height;
+  c.clearRect(0,0,W,H);
+  c.strokeStyle=col+'1a'; c.lineWidth=.5;
+  for(let i=0;i<=5;i++){ const y=(i/5)*H; c.beginPath(); c.moveTo(0,y); c.lineTo(W,y); c.stroke(); }
+  const step=W/(data.length-1);
+  const ag=c.createLinearGradient(0,0,0,H);
+  ag.addColorStop(0,col+'3a'); ag.addColorStop(1,col+'05');
+  c.beginPath(); c.moveTo(0,H-(data[0]/100)*H);
+  data.forEach((v,i)=>c.lineTo(i*step,H-(v/100)*H));
+  c.lineTo(W,H); c.lineTo(0,H); c.closePath(); c.fillStyle=ag; c.fill();
+  c.beginPath(); c.moveTo(0,H-(data[0]/100)*H);
+  data.forEach((v,i)=>c.lineTo(i*step,H-(v/100)*H));
+  c.strokeStyle=col; c.lineWidth=1.5; c.stroke();
+  const lv=data[data.length-1];
+  c.fillStyle=col; c.font='bold 11px Courier New'; c.textAlign='right';
+  c.fillText(Math.round(lv)+'%',W-4,14);
+}
+
+// ─── LOOP PRINCIPAL ──────────────────────────────────────────
+function loop(){
+  frames++;
+  renderMetrics();
+  camObjects.forEach(renderCam);
+  if(document.getElementById('tab-net').classList.contains('on')) renderNet();
+  if(document.getElementById('tab-map').classList.contains('on')) drawMap();
+  if(document.getElementById('tab-ana').classList.contains('on') && chartsInited){
+    thrHist.push(R(48,88)); if(thrHist.length>60) thrHist.shift();
+    netAct.push(R(20,92));  if(netAct.length>60)  netAct.shift();
+    if(frames%12===0){ drawBars(); drawPie(); }
+    drawLine('ch3',thrHist,'#ff4444');
+    drawLine('ch4',netAct,'#00c8ff');
+  }
+  requestAnimationFrame(loop);
+}
+
+// ─── INICIO ──────────────────────────────────────────────────
+buildCamGrid();
+loop();
+</script>
+</body>
+</html>
