@@ -702,6 +702,30 @@ class DerivEngine:
                 return
             log.info(f"Autorizado: {auth_resp.get('authorize', {}).get('email', 'OK')}")
 
+            # ── Cargar historial de ticks antes de suscribir ──────────
+            for symbol in INDICES:
+                try:
+                    await ws.send(json.dumps({
+                        "ticks_history": symbol,
+                        "count": 5000,
+                        "end": "latest",
+                        "style": "ticks",
+                        "adjust_start_time": 1
+                    }))
+                    hist_resp = json.loads(await ws.recv())
+                    if hist_resp.get("msg_type") == "history":
+                        history = hist_resp.get("history", {})
+                        prices  = history.get("prices", [])
+                        times   = history.get("times", [])
+                        state   = self.states[symbol]
+                        for price, epoch in zip(prices, times):
+                            state.push_tick(float(price), int(epoch))
+                        log.info(f"Historial cargado: {symbol} ({len(prices)} ticks)")
+                    else:
+                        log.warning(f"Historial no disponible para {symbol}")
+                except Exception as e:
+                    log.warning(f"Error cargando historial {symbol}: {e}")
+
             for symbol in INDICES:
                 await ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
                 log.info(f"Suscrito a {symbol}")
@@ -764,6 +788,9 @@ async def ws_endpoint(websocket: WebSocket):
                 "target_dir": state.target_dir,
                 "price":      list(state.prices)[-1] if state.prices else 0,
                 "total_spikes": len(state.spikes),
+                # Últimos 2000 precios para poblar el chart histórico
+                "history_prices": list(state.prices)[-2000:],
+                "history_epochs": list(state.tick_times)[-2000:],
             }
         await websocket.send_text(json.dumps({
             "type": "init",

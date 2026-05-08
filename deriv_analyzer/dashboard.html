@@ -850,6 +850,31 @@ function switchSym(sym){
   charts = {};
   buildChart(sym);
   microBuf = [];
+  // Cargar historial del símbolo seleccionado
+  const symData = lastData[sym];
+  if(symData && symData.history_prices && symData.history_prices.length > 1){
+    const ch = charts[sym];
+    if(ch){
+      const prices = symData.history_prices;
+      const tpb    = TICKFRAMES[currentTF] || 10;
+      const candleMap = new Map();
+      prices.forEach((price, i) => {
+        const bucket = Math.floor(i / tpb);
+        if(!candleMap.has(bucket)){
+          candleMap.set(bucket, {time:bucket, bucket, open:price, high:price, low:price, close:price});
+        } else {
+          const c2 = candleMap.get(bucket);
+          c2.high  = Math.max(c2.high, price); c2.low = Math.min(c2.low, price); c2.close = price;
+        }
+      });
+      const candles = Array.from(candleMap.values()).sort((a,b)=>a.time-b.time);
+      ch.series.setData(candles);
+      const lineMap = new Map();
+      prices.forEach((p,i)=>{ const t=Math.floor(i/tpb); lineMap.set(t,{time:t,value:p}); });
+      ch.filtSeries.setData(Array.from(lineMap.values()).sort((a,b)=>a.time-b.time));
+      ch.currentCandle = candles[candles.length-1] || null;
+    }
+  }
   updateOverlay(lastData[sym] || null);
 }
 
@@ -1264,6 +1289,37 @@ function connect(){
     if(msg.type === 'init'){
       Object.entries(msg.data).forEach(([sym,d])=>{ lastData[sym]=d; });
       buildChart(currentSym);
+      // Pintar historial en el chart
+      const symData = msg.data[currentSym];
+      if(symData && symData.history_prices && symData.history_prices.length > 1){
+        const ch = charts[currentSym];
+        if(ch){
+          const prices  = symData.history_prices;
+          const tpb     = TICKFRAMES[currentTF] || 10;
+          // Construir velas desde el historial
+          const candleMap = new Map();
+          prices.forEach((price, i) => {
+            const bucket = Math.floor(i / tpb);
+            if(!candleMap.has(bucket)){
+              candleMap.set(bucket, {time:bucket, bucket, open:price, high:price, low:price, close:price});
+            } else {
+              const c = candleMap.get(bucket);
+              c.high  = Math.max(c.high, price);
+              c.low   = Math.min(c.low,  price);
+              c.close = price;
+            }
+          });
+          const candles = Array.from(candleMap.values()).sort((a,b)=>a.time-b.time);
+          ch.series.setData(candles);
+          // Línea Kalman — usar precio directo como proxy
+          const lineData = prices.map((p,i)=>({time:Math.floor(i/tpb), value:p}));
+          // Deduplica por time (última)
+          const lineMap = new Map();
+          lineData.forEach(pt=>lineMap.set(pt.time, pt));
+          ch.filtSeries.setData(Array.from(lineMap.values()).sort((a,b)=>a.time-b.time));
+          ch.currentCandle = candles[candles.length-1] || null;
+        }
+      }
       if(msg.ops) updateOpsUI(msg.ops);
       return;
     }
