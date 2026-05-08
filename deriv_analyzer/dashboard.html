@@ -811,8 +811,14 @@ function buildChart(sym){
     rightPriceScale:{ borderColor:'rgba(0,200,255,.2)', scaleMargins:{top:0.1,bottom:0.1} },
   });
 
-  const series = chart.addLineSeries({
-    color: meta.col, lineWidth:1.5, priceLineVisible:false, lastValueVisible:true,
+  const series = chart.addCandlestickSeries({
+    upColor:         meta.type === 'boom' ? '#00e676' : '#ff1744',
+    downColor:       meta.type === 'boom' ? '#00695c' : '#b71c1c',
+    borderUpColor:   meta.type === 'boom' ? '#00e676' : '#ff1744',
+    borderDownColor: meta.type === 'boom' ? '#00695c' : '#b71c1c',
+    wickUpColor:     meta.type === 'boom' ? '#00e676' : '#ff1744',
+    wickDownColor:   meta.type === 'boom' ? '#00695c' : '#b71c1c',
+    priceLineVisible: false, lastValueVisible: true,
   });
   const filtSeries = chart.addLineSeries({
     color:'rgba(224,64,251,.45)', lineWidth:1, priceLineVisible:false,
