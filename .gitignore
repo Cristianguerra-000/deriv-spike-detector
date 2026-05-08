@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Logs
+*.log
+
+# Railway / build
+.nixpacks/
+
+# Firebase
+.firebase/
+firebase_deploy/.firebaserc
+
+# Editor
+.vscode/
+*.swp
