@@ -56,7 +56,7 @@ PROFILE_ALGOS: dict[MarketProfile, set[str]] = {
         "boom.spike_overdue", "boom.spike_magnitude",
         "boom.spike_interval_var", "boom.spike_cluster",
         "boom.tick_countdown", "boom.consec_spikes",
-        "boom.spike_depth", "boom.freq_change", "boom.spike_calendar",
+        "boom.spike_height", "boom.freq_change", "boom.spike_calendar",  # corregido: depth→height
         # ── Bloque B: Análisis de drift ──
         "crash.drift_slope", "crash.drift_channel", "crash.drift_accel",
         "crash.drift_exhaust", "crash.drift_linear", "crash.drift_vol",
@@ -73,6 +73,24 @@ PROFILE_ALGOS: dict[MarketProfile, set[str]] = {
         "boom.bear_streak", "boom.body_expand", "boom.wick_compress",
         "boom.price_vel", "boom.mom_div", "boom.consolidation",
         "boom.tension", "boom.lower_wick", "boom.range_compress", "boom.body_seq",
+        # ── Bloque D: Post-Spike ──
+        "crash.post_spike", "crash.retracement", "crash.recovery_speed",
+        "crash.impact", "crash.post_mom", "crash.echo",
+        "crash.vol_proxy", "crash.aftermath", "crash.double_bot", "crash.reversal",
+        "boom.post_spike", "boom.correction_lvl", "boom.correction_speed",
+        "boom.impact", "boom.post_mom", "boom.echo",
+        "boom.vol_proxy", "boom.aftermath", "boom.double_top", "boom.reversal",
+        # ── Bloque E: Probabilidad y Señal Final ──
+        "crash.probability", "crash.risk_composite",
+        "crash.safe_zone", "crash.danger_zone",
+        "crash.regime", "crash.cycle_phase",
+        "crash.optimal_entry", "crash.confidence",
+        "crash.next_price", "crash.signal_final",
+        "boom.probability", "boom.risk_composite",
+        "boom.safe_zone", "boom.danger_zone",
+        "boom.regime", "boom.cycle_phase",
+        "boom.optimal_entry", "boom.confidence",
+        "boom.next_price", "boom.signal_final",
     },
     MarketProfile.VOLATILITY: {
         "trend.rsi", "trend.macd", "trend.adx",

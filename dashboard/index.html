@@ -2,13 +2,33 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Laboratorio Deriv · Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Laboratorio Deriv</title>
   <link rel="stylesheet" href="css/styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
   <button id="drawerToggle" class="drawer-toggle" aria-label="Abrir menú">☰</button>
+  <button id="signalBtn" class="signal-btn" aria-label="Señal Final" title="Señal Final"><span id="signalBtnDot" class="signal-btn__dot"></span>⚡</button>
+
+  <!-- Panel señal final -->
+  <div id="signalPanel" class="signal-panel signal-panel--hidden">
+    <div class="sp-header">
+      <span class="sp-title">⚡ Señal Final</span>
+      <button class="sp-close" id="signalClose">✕</button>
+    </div>
+    <div class="sp-action" id="spAction">—</div>
+    <div class="sp-score-row">
+      <span class="sp-score-label">Score</span>
+      <span class="sp-score-val" id="spScore">—</span>
+    </div>
+    <div class="sp-bar-wrap"><div class="sp-bar" id="spBar"></div></div>
+    <div class="sp-details" id="spDetails"></div>
+    <div class="sp-reason" id="spReason"></div>
+    <div class="sp-divider">Contexto general</div>
+    <div class="sp-context" id="spContext"></div>
+  </div>
+
   <div id="drawerOverlay" class="drawer-overlay"></div>
 
   <aside id="drawer" class="drawer">
@@ -16,6 +36,16 @@
       <h2>Laboratorio</h2>
       <span class="badge" id="marketCount">0 mercados</span>
     </header>
+
+    <div class="drawer-controls">
+      <select id="granularity">
+        <option value="60">1 minuto</option>
+        <option value="300">5 minutos</option>
+        <option value="900">15 minutos</option>
+        <option value="3600">1 hora</option>
+        <option value="86400">1 día</option>
+      </select>
+    </div>
 
     <nav class="drawer-nav">
       <input id="searchSymbol" type="search" placeholder="Buscar símbolo…" />
@@ -43,47 +73,16 @@
   </aside>
 
   <main class="main">
-    <header class="topbar">
-      <h1 id="symbolTitle">Selecciona un mercado</h1>
-      <div class="topbar-actions">
-        <select id="granularity">
-          <option value="60">1m</option>
-          <option value="300">5m</option>
-          <option value="900">15m</option>
-          <option value="3600">1h</option>
-          <option value="86400">1d</option>
-        </select>
-        <button id="refreshBtn">↻ Actualizar</button>
-      </div>
-    </header>
-
-    <section class="chart-wrap">
+    <div class="chart-wrap">
+      <!-- Gráfica principal -->
       <div id="chart"></div>
-    </section>
 
-    <!-- Panel de señal de entrada fuerte -->
-    <section id="entryPanel" class="entry-panel entry-waiting">
-      <div class="entry-icon" id="entryIcon">⏳</div>
-      <div class="entry-body">
-        <div class="entry-title" id="entryTitle">Selecciona un mercado</div>
-        <div class="entry-sub" id="entrySub">El análisis se mostrará aquí</div>
-      </div>
-      <div class="entry-score">
-        <span id="entryScore">0/0</span>
-        <small>señales a favor</small>
-      </div>
-      <div class="entry-bar-wrap">
-        <div class="entry-bar" id="entryBar" style="width:0%"></div>
-      </div>
-    </section>
+      <!-- Fondo de tensión (detrás de todo) -->
+      <div id="tensionBg" class="tension-bg"></div>
 
-    <section class="results">
-      <header class="results-header">
-        <h3>Resultados de algoritmos</h3>
-        <span id="firebaseStatus" class="badge">Firebase: …</span>
-      </header>
-      <div id="resultsGrid" class="results-grid"></div>
-    </section>
+      <!-- Alerta de spike (cubre toda la gráfica momentáneamente) -->
+      <div id="spikeAlert" class="spike-alert spike-alert--hidden"></div>
+    </div>
   </main>
 
   <script type="module" src="js/app.js"></script>

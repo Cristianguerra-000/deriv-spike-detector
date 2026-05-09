@@ -15,7 +15,7 @@ from algorithms.crash_boom.spike_detector import SPIKE_ATR_MULTIPLIER
 
 @register
 class BoomHeightScore(AlgorithmBase):
-    name = "boom.spike_depth"
+    name = "boom.spike_height"
     category = "crash_boom"
     description = "Altura del último boom en puntos y %. Booms altos = mercado agresivo al alza."
 

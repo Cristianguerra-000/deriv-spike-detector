@@ -36,10 +36,12 @@ const state = {
   tickSubId: null,
   candles: [],          // últimas velas cargadas (para cálculos)
   priceLines: [],       // referencias a las price lines dibujadas
-  lastFavorPct: 0,      // último % de señales a favor (para redibujar sin Firebase)
+  driftLines: [],       // price lines del canal de drift
+  lastFavorPct: 0,
   spikeAt: null,        // epoch de la vela donde se detectó un spike
-  spikeCooldown: 5,     // velas de espera post-spike antes de nueva recomendación
-  newCandleTime: null,  // time de la vela actualmente abierta
+  spikeCooldown: 5,
+  newCandleTime: null,
+  algoData: {},         // { "crash.drift_channel": { value, signal, metadata, ... }, ... }
 };
 
 // ---------- WS helpers ----------
@@ -88,9 +90,19 @@ document.getElementById("drawerToggle").addEventListener("click", () => {
 });
 overlay.addEventListener("click", closeDrawer);
 
+// ---------- Panel Señal Final ----------
+const signalPanel = document.getElementById("signalPanel");
+document.getElementById("signalBtn").addEventListener("click", () => {
+  signalPanel.classList.toggle("signal-panel--hidden");
+});
+document.getElementById("signalClose").addEventListener("click", () => {
+  signalPanel.classList.add("signal-panel--hidden");
+});
+
 function buildChart() {
   state.chart = LightweightCharts.createChart($("#chart"), {
-    layout: { background: { color: "#131a2b" }, textColor: "#e6edf7" },
+    autoSize: true,
+    layout: { background: { color: "#0b0f1a" }, textColor: "#e6edf7" },
     grid: { vertLines: { color: "#1b2438" }, horzLines: { color: "#1b2438" } },
     timeScale: { timeVisible: true, secondsVisible: false },
     crosshair: { mode: 0 },
@@ -99,9 +111,6 @@ function buildChart() {
     upColor: "#26a69a", downColor: "#ef5350",
     borderUpColor: "#26a69a", borderDownColor: "#ef5350",
     wickUpColor: "#26a69a", wickDownColor: "#ef5350",
-  });
-  window.addEventListener("resize", () => {
-    state.chart.applyOptions({ width: $("#chart").clientWidth });
   });
   buildMASeries();
 }
@@ -276,7 +285,6 @@ $("#granularity").addEventListener("change", (e) => {
   state.granularity = Number(e.target.value);
   if (state.symbol) loadCandles(state.symbol);
 });
-$("#refreshBtn").addEventListener("click", () => state.symbol && loadCandles(state.symbol));
 
 // ---------- Datos ----------
 async function loadMarkets() {
@@ -296,7 +304,6 @@ function classify(sym, market) {
 
 async function selectSymbol(symbol, displayName) {
   state.symbol = symbol;
-  $("#symbolTitle").textContent = displayName || symbol;
   document.querySelectorAll(".symbol-list li").forEach((li) => {
     li.classList.toggle("active", li.dataset.symbol === symbol);
   });
@@ -310,11 +317,9 @@ async function loadCandles(symbol) {
     await send({ forget: state.tickSubId });
     state.tickSubId = null;
   }
-  // Indicador de carga
-  $("#symbolTitle").textContent = `${symbol} · Cargando histórico…`;
   const resp = await send({
     ticks_history: symbol,
-    count: 5000,            // máximo permitido por la API de Deriv
+    count: 5000,
     end: "latest",
     style: "candles",
     granularity: state.granularity,
@@ -329,11 +334,8 @@ async function loadCandles(symbol) {
   state.candles = candles;
   updateMAs();
   drawFib(symbol);
-  // Ajustar zoom para mostrar todo el histórico cargado
+  drawSpikeMarkers();
   state.chart.timeScale().fitContent();
-  // Restaurar título con número de velas cargadas
-  const displayName = document.querySelector(`.symbol-list li[data-symbol="${symbol}"]`)?.textContent || symbol;
-  $("#symbolTitle").textContent = `${displayName} · ${candles.length} velas`;
 }
 
 function onOhlc(ohlc) {
@@ -365,10 +367,10 @@ function onOhlc(ohlc) {
 
   updateMAs();
 
-  // Cada vela nueva: redibujar Fib + actualizar línea de precio actual
+  // Cada vela nueva: redibujar Fib + trade zones
   if (isNewCandle) {
     drawFib(state.symbol);
-    // Redibujar zonas de entrada con el último pct conocido
+    drawSpikeMarkers();
     if (state.symbol) {
       const isCrash = state.symbol.startsWith("CRASH");
       const isBoom  = state.symbol.startsWith("BOOM");
@@ -377,7 +379,6 @@ function onOhlc(ohlc) {
       }
     }
   } else {
-    // Misma vela: solo actualizar la línea de precio actual (sin redibujar todo)
     _updateActualLine();
   }
 }
@@ -388,34 +389,32 @@ function _detectAndHandleSpike(closedCandle) {
   const isBoom  = state.symbol.startsWith("BOOM");
   if (!isCrash && !isBoom) return;
 
-  // ATR de las 14 velas anteriores
   const prev14 = state.candles.slice(-14);
   const atr = prev14.reduce((s, c) => s + (c.high - c.low), 0) / Math.max(prev14.length, 1);
   const candleRange = closedCandle.high - closedCandle.low;
   const bodyMove = Math.abs(closedCandle.close - closedCandle.open);
 
-  // Spike: vela cuyo rango > 3×ATR Y cuerpo > 2×ATR
   const isSpike = candleRange > atr * 3 && bodyMove > atr * 2;
   if (!isSpike) return;
 
-  // Verificar dirección correcta del spike
-  const crashSpike = closedCandle.close < closedCandle.open;  // bajista
-  const boomSpike  = closedCandle.close > closedCandle.open;  // alcista
+  const crashSpike = closedCandle.close < closedCandle.open;
+  const boomSpike  = closedCandle.close > closedCandle.open;
   if (isCrash && !crashSpike) return;
   if (isBoom  && !boomSpike)  return;
 
-  // ✓ Spike confirmado → limpiar zonas y entrar en cooldown
   state.spikeAt = closedCandle.time;
   clearPriceLines();
 
-  // Mostrar aviso en el panel de entrada
-  const panel = $("#entryPanel");
-  panel.className = "entry-panel entry-spike";
-  $("#entryIcon").textContent = isCrash ? "💥" : "🚀";
-  $("#entryTitle").textContent = `SPIKE DETECTADO — Cooldown ${state.spikeCooldown} velas`;
-  $("#entrySub").textContent = `El spike ${isCrash ? "bajista" : "alcista" } se confirmó. Esperando nueva estructura para re-entrada.`;
-  $("#entryScore").textContent = "---";
-  $("#entryBar").style.width = "0%";
+  // Mostrar alerta dentro de la gráfica
+  const alert = $("#spikeAlert");
+  alert.innerHTML = `
+    <div class="spike-alert__icon">${isCrash ? "💥" : "🚀"}</div>
+    <div class="spike-alert__title">SPIKE DETECTADO</div>
+    <div class="spike-alert__sub">Cooldown ${state.spikeCooldown} velas · ${isCrash ? "Crash bajista" : "Boom alcista"} confirmado</div>
+  `;
+  alert.className = "spike-alert spike-alert--visible";
+  setTimeout(() => { alert.className = "spike-alert spike-alert--hidden"; }, 4500);
+
 }
 
 function _inSpikeCooldown() {
@@ -437,95 +436,275 @@ function _updateActualLine() {
 
 function onTick(_tick) { /* hook futuro */ }
 
-// ---------- Firebase: resultados de algoritmos ----------
+// ---------- Firebase: resultados de algoritmos → solo alimentan overlays ----------
 const resultUnsubs = [];
 
+// Algoritmos garantizados — se suscriben siempre aunque aún no exista el stub en Firestore
+const GUARANTEED_ALGOS = [
+  "crash.signal_final", "boom.signal_final",
+  "crash.risk_composite", "boom.risk_composite",
+  "crash.probability", "boom.probability",
+  "crash.regime", "boom.regime",
+  "crash.cycle_phase", "boom.cycle_phase",
+  "crash.confidence", "boom.confidence",
+  "crash.optimal_entry", "boom.optimal_entry",
+];
+
+function _subscribeAlgo(algoName, symbol) {
+  const docRef = doc(db, "results", algoName, "symbols", symbol);
+  const unsub = onSnapshot(docRef, (snap) => {
+    if (!snap.exists()) { delete state.algoData[algoName]; }
+    else {
+      const data = snap.data();
+      if (!data.signal || data.signal === "N/A") { delete state.algoData[algoName]; }
+      else { state.algoData[algoName] = data; }
+    }
+    refreshChartVisuals();
+  });
+  resultUnsubs.push(unsub);
+}
+
 async function loadAlgorithmResults(symbol) {
-  // Limpia listeners previos
   while (resultUnsubs.length) resultUnsubs.pop()();
-  const grid = $("#resultsGrid");
-  grid.innerHTML = "";
-  // Limpia zonas de la gráfica del símbolo anterior
+  state.algoData = {};
   clearPriceLines();
+  clearDriftLines();
   clearFib();
-  // Resetear cooldown al cambiar de símbolo
   state.spikeAt = null;
   state.lastFavorPct = 0;
   state.newCandleTime = null;
 
-  // Resetear panel de entrada
-  const panel = $("#entryPanel");
-  panel.className = "entry-panel entry-waiting";
-  $("#entryIcon").textContent = "⏳";
-  $("#entryTitle").textContent = "Cargando señales…";
-  $("#entrySub").textContent = "Leyendo algoritmos de Firestore";
-  $("#entryScore").textContent = "0/0";
-  $("#entryBar").style.width = "0%";
+  // 1. Suscripciones garantizadas (siempre, aunque el stub no exista aún)
+  GUARANTEED_ALGOS.forEach((name) => _subscribeAlgo(name, symbol));
 
+  // 2. Descubrimiento dinámico del resto de algoritmos en Firestore
   try {
     const algosSnap = await getDocs(collection(db, "results"));
-    if (algosSnap.empty) {
-      grid.innerHTML = `<div class="result-card"><div class="name">Sin datos</div><div class="value">Ejecuta el pipeline Python</div></div>`;
-      $("#firebaseStatus").textContent = "Firebase: vacío";
-      return;
-    }
-
-    $("#firebaseStatus").textContent = `Firebase: ${algosSnap.size} algoritmos`;
+    if (algosSnap.empty) return;
 
     algosSnap.forEach((algoDoc) => {
       const algoName = algoDoc.id;
-      const card = document.createElement("div");
-      card.className = "result-card";
-      card.id = `card-${algoName.replace(/\./g, "-")}`;
-      card.innerHTML = `
-        <div class="algo-name">${algoName}</div>
-        <span class="signal-badge" data-signal="">…</span>
-        <div class="algo-value">—</div>
-        <div class="algo-interpretation">Cargando…</div>`;
-      grid.appendChild(card);
-
-      // Escucha el documento fijo: results/{algoName}/symbols/{symbol}
-      const docRef = doc(db, "results", algoName, "symbols", symbol);
-      const unsub = onSnapshot(
-        docRef,
-        (snap) => {
-          if (!snap.exists()) {
-            // Sin datos para este símbolo → ocultar card (algoritmo no aplica)
-            card.remove();
-            return;
-          }
-          // Re-insertar si estaba oculta (cambio de símbolo rápido)
-          if (!grid.contains(card)) grid.appendChild(card);
-          const data = snap.data();
-          const signal = data.signal || "NEUTRO";
-          // Filtrar señales N/A (algoritmo no aplica al mercado)
-          if (signal === "N/A") { card.remove(); return; }
-          const badge = card.querySelector(".signal-badge");
-          badge.textContent = signal;
-          badge.className = `signal-badge ${signal.toLowerCase().replace(/\s+/g, "-")}`;
-          card.querySelector(".algo-value").textContent = formatValue(data.value);
-          card.querySelector(".algo-interpretation").textContent = data.interpretation || "";
-          // Actualizar contador y panel de entrada
-          $("#firebaseStatus").textContent = `Firebase: ${grid.children.length} señales`;
-          updateEntryPanel(symbol);
-        },
-        () => { card.querySelector(".algo-interpretation").textContent = "Error al leer Firestore."; },
-      );
-      resultUnsubs.push(unsub);
+      if (GUARANTEED_ALGOS.includes(algoName)) return; // ya suscrito arriba
+      _subscribeAlgo(algoName, symbol);
     });
   } catch (err) {
     console.error("Firebase:", err);
-    $("#firebaseStatus").textContent = "Firebase: error";
   }
 }
 
-// ---------- Panel de entrada fuerte ----------
+// ---------- Refresca todos los visuales según algoData ----------
+function refreshChartVisuals() {
+  const symbol = state.symbol;
+  if (!symbol) return;
+  const isCrash = symbol.startsWith("CRASH");
+  const isBoom  = symbol.startsWith("BOOM");
+  if (!isCrash && !isBoom) return;
+
+  // 1. Calcular score
+  let favor = 0, total = 0;
+  for (const data of Object.values(state.algoData)) {
+    const sig = (data.signal || "").trim().toUpperCase();
+    if (!sig || sig === "NEUTRO" || sig === "SIN PATRÓN" || sig === "LATERAL" || sig === "EQUILIBRADO") continue;
+    total++;
+    if (isCrash && BEARISH_SIGNALS.has(sig)) favor++;
+    if (isBoom  && BULLISH_SIGNALS.has(sig)) favor++;
+  }
+  const pct = total > 0 ? (favor / total) * 100 : 0;
+  state.lastFavorPct = pct;
+
+  // 3. Canal de drift
+  const channelKey = isCrash ? "crash.drift_channel" : "boom.drift_channel";
+  if (state.algoData[channelKey]) drawDriftChannel(state.algoData[channelKey].metadata, isCrash);
+
+  // 4. Tensión de fondo
+  const tensionKey = isCrash ? "crash.tension" : "boom.tension";
+  if (state.algoData[tensionKey]) applyTensionBg(state.algoData[tensionKey].value, isCrash);
+
+  // 5. Zonas de trade
+  if (!_inSpikeCooldown()) drawTradeZones(symbol, isCrash, pct);
+
+  // 6. Panel señal final
+  updateSignalPanel(symbol, isCrash, favor, total, pct);
+}
+
+// ---------- Panel Señal Final — actualiza contenido ----------
+function updateSignalPanel(symbol, isCrash, favor, total, pct) {
+  const key  = isCrash ? "crash.signal_final" : "boom.signal_final";
+  const data = state.algoData[key];
+  const action = data?.metadata?.action || (data ? data.signal : null);
+  const actionLow = (action || "na").toLowerCase();
+
+  // Dot de color en el botón
+  const dot = document.getElementById("signalBtnDot");
+  dot.className = `signal-btn__dot signal-btn__dot--${actionLow}`;
+
+  // Acción principal
+  const spAction = document.getElementById("spAction");
+  spAction.className = `sp-action sp-action--${actionLow}`;
+  spAction.textContent = action || "Sin datos";
+
+  // Score
+  const score = data?.metadata?.score ?? data?.value ?? null;
+  document.getElementById("spScore").textContent = score !== null ? `${score}/100` : "—";
+
+  // Barra
+  const spBar = document.getElementById("spBar");
+  spBar.style.width = score !== null ? `${score}%` : "0%";
+  spBar.className = `sp-bar sp-bar--${actionLow}`;
+
+  // Métricas de detalle (grid 2 columnas)
+  const details = [];
+  if (data?.metadata) {
+    const m = data.metadata;
+    if (m.regime !== undefined)      details.push({ label: "Régimen",    val: m.regime });
+    if (m.cycle_pct !== undefined)   details.push({ label: "Ciclo",      val: `${m.cycle_pct}%` });
+    if (m.risk_score !== undefined)  details.push({ label: "Riesgo",     val: `${m.risk_score}/100` });
+    if (m.confidence !== undefined)  details.push({ label: "Confianza",  val: `${m.confidence}%` });
+    if (m.rsi !== undefined)         details.push({ label: "RSI (7)",    val: m.rsi });
+    const barsKey = isCrash ? "bars_since_crash" : "bars_since_boom";
+    if (m[barsKey] !== undefined)    details.push({ label: "Velas desde spike", val: m[barsKey] });
+  }
+  document.getElementById("spDetails").innerHTML = details.map(
+    (d) => `<div class="sp-detail-item"><span class="sp-detail-label">${d.label}</span><span class="sp-detail-val">${d.val}</span></div>`
+  ).join("");
+
+  // Interpretación
+  document.getElementById("spReason").textContent = data?.interpretation || "Esperando datos de Firebase…";
+
+  // Contexto: mismos tags del overlay
+  const tensionKey = isCrash ? "crash.tension" : "boom.tension";
+  const overdueKey = isCrash ? "crash.spike_overdue" : "boom.spike_overdue";
+  const countKey   = isCrash ? "crash.tick_countdown" : "boom.tick_countdown";
+  const riskKey    = isCrash ? "crash.risk_composite" : "boom.risk_composite";
+  const probKey    = isCrash ? "crash.probability" : "boom.probability";
+  const ctx = [];
+
+  if (state.algoData[tensionKey]) {
+    const v = state.algoData[tensionKey].value;
+    const cls = v >= 70 ? "tag-hot" : v >= 40 ? "tag-warn" : "tag-ok";
+    ctx.push(`<span class="${cls}">⚡ Tensión ${v}/100</span>`);
+  }
+  if (state.algoData[overdueKey]) {
+    const v = Math.round(state.algoData[overdueKey].value);
+    const cls = v >= 80 ? "tag-hot" : v >= 50 ? "tag-warn" : "tag-ok";
+    ctx.push(`<span class="${cls}">⏱ Overdue ${v}%</span>`);
+  }
+  if (state.algoData[countKey]) {
+    const v = Math.round(state.algoData[countKey].value);
+    ctx.push(`<span>🕐 ~${v} velas estimadas</span>`);
+  }
+  if (state.algoData[riskKey]) {
+    const v = Math.round(state.algoData[riskKey].value);
+    const cls = v >= 70 ? "tag-hot" : v >= 40 ? "tag-warn" : "tag-ok";
+    ctx.push(`<span class="${cls}">🎯 Riesgo compuesto ${v}/100</span>`);
+  }
+  if (state.algoData[probKey]) {
+    const m = state.algoData[probKey].metadata;
+    if (m) {
+      const p10 = m.prob_10 !== undefined ? `${(m.prob_10 * 100).toFixed(0)}%` : "—";
+      const p20 = m.prob_20 !== undefined ? `${(m.prob_20 * 100).toFixed(0)}%` : "—";
+      ctx.push(`<span>📊 Prob. 10v: ${p10} · 20v: ${p20}</span>`);
+    }
+  }
+  // Señal de consenso (del overlay existente)
+  const dir = isCrash ? "⬇ Crash" : "⬆ Boom";
+  const cons = pct >= 55 ? "Fuerte" : pct >= 35 ? "Moderada" : "Débil";
+  const cls  = pct >= 55 ? "tag-ok" : pct >= 35 ? "tag-warn" : "tag-hot";
+  ctx.push(`<span class="${cls}">📈 ${dir} ${cons} (${favor}/${total} algos · ${pct.toFixed(0)}%)</span>`);
+
+  document.getElementById("spContext").innerHTML = ctx.join("");
+}
+
+// ---------- Canal de drift ----------
+function clearDriftLines() {
+  if (!state.candleSeries) return;
+  state.driftLines.forEach((pl) => { try { state.candleSeries.removePriceLine(pl); } catch (_) {} });
+  state.driftLines = [];
+}
+
+function drawDriftChannel(meta, isCrash) {
+  if (!meta || !state.candleSeries) return;
+  clearDriftLines();
+  const upper = meta.upper_band;
+  const lower = meta.lower_band;
+  const mid   = meta.trend_mid;
+  if (!upper || !lower) return;
+
+  const make = (price, color, title) => {
+    const pl = state.candleSeries.createPriceLine({
+      price, color, lineWidth: 1, lineStyle: 2,
+      axisLabelVisible: true, title,
+    });
+    state.driftLines.push(pl);
+  };
+
+  if (isCrash) {
+    make(upper, "rgba(239,83,80,0.7)", "Canal ↑");
+    make(mid,   "rgba(239,83,80,0.35)", "Drift mid");
+    make(lower, "rgba(38,166,154,0.7)", "Canal ↓");
+  } else {
+    make(upper, "rgba(38,166,154,0.7)", "Canal ↑");
+    make(mid,   "rgba(38,166,154,0.35)", "Drift mid");
+    make(lower, "rgba(239,83,80,0.7)", "Canal ↓");
+  }
+}
+
+// ---------- Marcadores de spikes históricos ----------
+function drawSpikeMarkers() {
+  if (!state.candleSeries || !state.candles.length || !state.symbol) return;
+  const isCrash = state.symbol.startsWith("CRASH");
+  const isBoom  = state.symbol.startsWith("BOOM");
+  if (!isCrash && !isBoom) return;
+
+  const candles = state.candles;
+  const body = candles.map((c) => Math.abs(c.close - c.open));
+  const sortedBody = [...body].sort((a, b) => a - b);
+  const normalBody = sortedBody[Math.floor(sortedBody.length * 0.75)];
+  const threshold = normalBody * 2.5;
+
+  const markers = [];
+  candles.forEach((c) => {
+    if (isCrash) {
+      const wick = Math.min(c.open, c.close) - c.low;
+      if (wick > threshold) {
+        markers.push({ time: c.time, position: "belowBar", color: "#ef5350", shape: "arrowDown", text: "▼" });
+      }
+    } else {
+      const wick = c.high - Math.max(c.open, c.close);
+      if (wick > threshold) {
+        markers.push({ time: c.time, position: "aboveBar", color: "#26a69a", shape: "arrowUp", text: "▲" });
+      }
+    }
+  });
+
+  state.candleSeries.setMarkers(markers);
+}
+
+// ---------- Fondo de tensión ----------
+function applyTensionBg(tensionValue, isCrash) {
+  const el = $("#tensionBg");
+  if (!el) return;
+  const v = Math.min(Math.max(Number(tensionValue) || 0, 0), 100);
+  const alpha = (v / 100) * 0.12;
+  if (v < 20) {
+    el.style.background = "transparent";
+    el.style.opacity = "0";
+    return;
+  }
+  el.style.opacity = "1";
+  el.style.background = isCrash
+    ? `radial-gradient(ellipse at top, rgba(239,83,80,${alpha}) 0%, transparent 70%)`
+    : `radial-gradient(ellipse at bottom, rgba(38,166,154,${alpha}) 0%, transparent 70%)`;
+}
+
+// ---------- Señales que cuentan como favorables ----------
 // Señales que favorecen movimiento BAJISTA (CRASH busca spike hacia abajo)
 const BEARISH_SIGNALS = new Set([
   "REVERSIÓN BAJISTA", "TENDENCIA BAJISTA", "BAJISTA", "BAJISTA DÉBIL",
   "CRUCE BAJISTA", "BREAKOUT BAJISTA", "SOBRECOMPRADO", "SOBRECOMPRA EXTREMA",
   "SPIKE INMINENTE", "PRE-SPIKE", "TENSIÓN ALTA", "TENSIÓN EXTREMA",
   "CONSOLIDACIÓN TENSA", "VELOCIDAD ALTA", "RANGO AMPLIO",
+  "TECHO DEL CANAL", "RACHA EXTREMA", "RACHA ALTA", "DIVERGENCIA BAJISTA",
 ]);
 // Señales que favorecen movimiento ALCISTA (BOOM busca spike hacia arriba)
 const BULLISH_SIGNALS = new Set([
@@ -533,67 +712,8 @@ const BULLISH_SIGNALS = new Set([
   "CRUCE ALCISTA", "BREAKOUT ALCISTA", "SOBREVENDIDO", "SOBREVENTA EXTREMA",
   "SPIKE INMINENTE", "PRE-SPIKE", "TENSIÓN ALTA", "TENSIÓN EXTREMA",
   "CONSOLIDACIÓN TENSA", "VELOCIDAD ALTA", "RANGO AMPLIO",
+  "PISO DEL CANAL", "RACHA EXTREMA", "RACHA ALTA", "DIVERGENCIA ALCISTA",
 ]);
-
-function updateEntryPanel(symbol) {
-  if (!symbol) return;
-  const grid = $("#resultsGrid");
-  const cards = Array.from(grid.querySelectorAll(".result-card"));
-  if (!cards.length) return;
-
-  const isCrash = symbol.startsWith("CRASH");
-  const isBoom  = symbol.startsWith("BOOM");
-  if (!isCrash && !isBoom) {
-    // Símbolo no crash/boom → ocultar panel
-    $("#entryPanel").className = "entry-panel entry-waiting";
-    clearPriceLines();
-    return;
-  }
-
-  // Si estamos en cooldown post-spike, no sobrescribir el aviso
-  if (_inSpikeCooldown()) return;
-
-  let favor = 0;
-  let total = 0;
-  cards.forEach((card) => {
-    const badge = card.querySelector(".signal-badge");
-    if (!badge) return;
-    const sig = (badge.textContent || "").trim().toUpperCase();
-    if (!sig || sig === "…" || sig === "NEUTRO" || sig === "SIN PATRÓN" || sig === "LATERAL" || sig === "EQUILIBRADO") return;
-    total++;
-    if (isCrash && BEARISH_SIGNALS.has(sig)) favor++;
-    if (isBoom  && BULLISH_SIGNALS.has(sig))  favor++;
-  });
-
-  const pct = total > 0 ? (favor / total) * 100 : 0;
-  const panel = $("#entryPanel");
-  const dirLabel = isCrash ? "VENTA (spike bajista)" : "COMPRA (spike alcista)";
-  const dirEmoji = isCrash ? "⬇️" : "⬆️";
-
-  $("#entryScore").textContent = `${favor}/${total}`;
-  $("#entryBar").style.width = `${pct.toFixed(0)}%`;
-  state.lastFavorPct = pct;  // guardar para redibujar en cada vela
-
-  if (pct >= 55) {
-    panel.className = "entry-panel entry-strong";
-    $("#entryIcon").textContent = isCrash ? "🔴" : "🟢";
-    $("#entryTitle").textContent = `${dirEmoji} SEÑAL FUERTE DE ENTRADA — ${dirLabel}`;
-    $("#entrySub").textContent = `${favor} de ${total} algoritmos confirman el spike. Alta probabilidad de movimiento. Considera entrar.`;
-  } else if (pct >= 35) {
-    panel.className = "entry-panel entry-moderate";
-    $("#entryIcon").textContent = "🟡";
-    $("#entryTitle").textContent = `⚠️ SEÑAL MODERADA — Confirmar`;
-    $("#entrySub").textContent = `${favor} de ${total} señales a favor de ${dirLabel}. Esperar más confirmación antes de entrar.`;
-  } else {
-    panel.className = "entry-panel entry-weak";
-    $("#entryIcon").textContent = "⏸️";
-    $("#entryTitle").textContent = "🚫 SEÑAL DÉBIL — No entrar aún";
-    $("#entrySub").textContent = `Solo ${favor} de ${total} señales a favor. Las condiciones no son óptimas para ${dirLabel}.`;
-  }
-
-  // Dibujar zonas en la gráfica
-  drawTradeZones(symbol, isCrash, pct);
-}
 
 // ---------- Zonas en la gráfica ----------
 function clearPriceLines() {
@@ -689,13 +809,6 @@ function drawTradeZones(symbol, isCrash, favorPct) {
   make(safePrice, safeColor, safeLabel, 2, 1);
   // Precio actual de referencia (sutil)
   make(last, "#4fc3f7", `Actual ${last.toFixed(3)}`, 2, 1);
-}
-
-function formatValue(v) {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "number") return v.toFixed(5);
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
 }
 
 // ---------- Init ----------
