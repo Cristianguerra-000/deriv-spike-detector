@@ -15,7 +15,8 @@ import pandas as pd
 from algorithms._base import AlgorithmBase, AlgorithmResult, register
 
 # Umbral: una vela es spike si su wick extrema es > N veces el ATR promedio
-SPIKE_ATR_MULTIPLIER = 4.0
+# Calibrado con CB_CalibrateThreshold (MT5, 100k velas M1, Crash 1000) → óptimo = 6.0
+SPIKE_ATR_MULTIPLIER = 6.0
 
 
 @register
