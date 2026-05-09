@@ -73,7 +73,7 @@ def _quick_risk(window: pd.DataFrame, mode: str, last_idx) -> float:
 
 
 def _quick_cycle(window: pd.DataFrame, mode: str, last_idx) -> float:
-    """% del ciclo completado (precio)."""
+    """% del ciclo completado (precio), clampeado [0, 100]."""
     if last_idx is None:
         return 50.0
     if mode == "crash":
@@ -81,13 +81,14 @@ def _quick_cycle(window: pd.DataFrame, mode: str, last_idx) -> float:
         pre = window.iloc[max(0, last_idx - 20): last_idx]
         high_val = float(pre["high"].max()) if len(pre) > 0 else float(window.loc[last_idx, "open"])
         current  = float(window["close"].iloc[-1])
-        return min((current - low_val) / (high_val - low_val) * 100, 100.0) if high_val != low_val else 50.0
+        raw = (current - low_val) / (high_val - low_val) * 100 if high_val != low_val else 50.0
     else:
         high_val = float(window.loc[last_idx, "high"])
         pre = window.iloc[max(0, last_idx - 20): last_idx]
         low_val  = float(pre["low"].min()) if len(pre) > 0 else float(window.loc[last_idx, "open"])
         current  = float(window["close"].iloc[-1])
-        return min((high_val - current) / (high_val - low_val) * 100, 100.0) if high_val != low_val else 50.0
+        raw = (high_val - current) / (high_val - low_val) * 100 if high_val != low_val else 50.0
+    return max(0.0, min(float(raw), 100.0))
 
 
 def _quick_confidence(window: pd.DataFrame, mode: str) -> float:
@@ -121,7 +122,7 @@ class CrashSignalFinal(AlgorithmBase):
         confidence = _quick_confidence(window, "crash")
 
         # RSI de las últimas 14 velas como factor secundario
-        rsi = _rsi(window["close"].values[-14:], period=7)
+        rsi = float(_rsi(window["close"].values[-14:], period=7))
 
         # ── Lógica de decisión ──────────────────────────────────────
         if regime == "SPIKE":
@@ -205,7 +206,7 @@ class BoomSignalFinal(AlgorithmBase):
         risk       = _quick_risk(window, "boom", last_idx)
         cycle_pct  = _quick_cycle(window, "boom", last_idx)
         confidence = _quick_confidence(window, "boom")
-        rsi = _rsi(window["close"].values[-14:], period=7)
+        rsi = float(_rsi(window["close"].values[-14:], period=7))
 
         if regime == "SPIKE":
             action = "EXIT"
