@@ -48,49 +48,44 @@ PROFILE_ALGOS: dict[MarketProfile, set[str]] = {
         "cb.spike_detector",
         "micro.candle_anatomy", "micro.engulfing",
         "trend.lr_slope",
-        # ── Bloque A: Timing de spikes ──
+        # ── Detección y estado event-driven (v2 — núcleo) ──
+        "cb.v2.state",          # estado persistente del spike
+        "cb.v2.threshold",      # umbral MAD adaptativo
+        "cb.v2.hazard",         # probabilidad real (Weibull + empírica)
+        "cb.v2.pre_capture",    # captura pre-spike (aprendiz)
+        "cb.v2.regime",         # DRIFT / OVERDUE / POST_SPIKE
+        "cb.v2.entry",          # Crash→SELL, Boom→BUY
+        "cb.v2.exit_time",      # time-stop antes del próximo spike
+        "cb.v2.sizing",          # tamaño por hazard
+        "cb.v2.quality",        # data quality gate
+        "cb.v2.signal",         # ★ SEÑAL FINAL v2 (humano-legible)
+        # ── Timing de spikes (sobreviven) ──
         "crash.spike_overdue", "crash.spike_magnitude",
         "crash.spike_interval_var", "crash.spike_cluster",
         "crash.tick_countdown", "crash.consec_spikes",
-        "crash.spike_depth", "crash.freq_change", "crash.spike_calendar",
+        "crash.freq_change",
         "boom.spike_overdue", "boom.spike_magnitude",
         "boom.spike_interval_var", "boom.spike_cluster",
         "boom.tick_countdown", "boom.consec_spikes",
-        "boom.spike_height", "boom.freq_change", "boom.spike_calendar",  # corregido: depth→height
-        # ── Bloque B: Análisis de drift ──
+        "boom.freq_change",
+        # ── Drift (sobreviven los compuestos) ──
         "crash.drift_slope", "crash.drift_channel", "crash.drift_accel",
-        "crash.drift_exhaust", "crash.drift_linear", "crash.drift_vol",
-        "crash.micro_drift", "crash.drift_consist",
+        "crash.drift_exhaust",
         "crash.recovery_traj", "crash.recovery_pct",
         "boom.drift_slope", "boom.drift_channel", "boom.drift_decel",
         "boom.drift_exhaust", "boom.drift_linear", "boom.drift_vol",
         "boom.micro_drift", "boom.drift_consist",
         "boom.correction_traj", "boom.correction_pct",
-        # ── Bloque C: Tensión Pre-Spike ──
-        "crash.bull_streak", "crash.body_expand", "crash.wick_compress",
-        "crash.price_vel", "crash.mom_div", "crash.consolidation",
-        "crash.tension", "crash.upper_wick", "crash.range_compress", "crash.body_seq",
-        "boom.bear_streak", "boom.body_expand", "boom.wick_compress",
-        "boom.price_vel", "boom.mom_div", "boom.consolidation",
-        "boom.tension", "boom.lower_wick", "boom.range_compress", "boom.body_seq",
-        # ── Bloque D: Post-Spike ──
+        # ── Tensión Pre-Spike (mantener score compuesto) ──
+        "crash.tension", "crash.range_compress", "crash.bull_streak",
+        "boom.tension", "boom.range_compress", "boom.bear_streak",
+        # ── Post-Spike ──
         "crash.post_spike", "crash.retracement", "crash.recovery_speed",
-        "crash.impact", "crash.post_mom", "crash.echo",
-        "crash.vol_proxy", "crash.aftermath", "crash.double_bot", "crash.reversal",
+        "crash.impact", "crash.post_mom",
+        "crash.aftermath", "crash.reversal",
         "boom.post_spike", "boom.correction_lvl", "boom.correction_speed",
-        "boom.impact", "boom.post_mom", "boom.echo",
-        "boom.vol_proxy", "boom.aftermath", "boom.double_top", "boom.reversal",
-        # ── Bloque E: Probabilidad y Señal Final ──
-        "crash.probability", "crash.risk_composite",
-        "crash.safe_zone", "crash.danger_zone",
-        "crash.regime", "crash.cycle_phase",
-        "crash.optimal_entry", "crash.confidence",
-        "crash.next_price", "crash.signal_final",
-        "boom.probability", "boom.risk_composite",
-        "boom.safe_zone", "boom.danger_zone",
-        "boom.regime", "boom.cycle_phase",
-        "boom.optimal_entry", "boom.confidence",
-        "boom.next_price", "boom.signal_final",
+        "boom.impact", "boom.post_mom",
+        "boom.aftermath", "boom.reversal",
     },
     MarketProfile.VOLATILITY: {
         "trend.rsi", "trend.macd", "trend.adx",

@@ -336,6 +336,13 @@ async function loadCandles(symbol) {
   drawFib(symbol);
   drawSpikeMarkers();
   state.chart.timeScale().fitContent();
+
+  // Señal local inmediata (fallback antes de que llegue Firebase)
+  if (symbol) {
+    const isCrash = symbol.startsWith("CRASH");
+    const isBoom  = symbol.startsWith("BOOM");
+    if (isCrash || isBoom) updateSignalPanel(symbol, isCrash, 0, 0, 0);
+  }
 }
 
 function onOhlc(ohlc) {
@@ -439,15 +446,17 @@ function onTick(_tick) { /* hook futuro */ }
 // ---------- Firebase: resultados de algoritmos → solo alimentan overlays ----------
 const resultUnsubs = [];
 
-// Algoritmos garantizados — se suscriben siempre aunque aún no exista el stub en Firestore
+// Algoritmos garantizados v2 — únicas fuentes de verdad operativas
 const GUARANTEED_ALGOS = [
-  "crash.signal_final", "boom.signal_final",
-  "crash.risk_composite", "boom.risk_composite",
-  "crash.probability", "boom.probability",
-  "crash.regime", "boom.regime",
-  "crash.cycle_phase", "boom.cycle_phase",
-  "crash.confidence", "boom.confidence",
-  "crash.optimal_entry", "boom.optimal_entry",
+  "cb.v2.signal",      // señal final (acción + probabilidades + warnings)
+  "cb.v2.hazard",      // probabilidad real del próximo spike
+  "cb.v2.regime",      // POST_SPIKE / OVERDUE / DRIFT
+  "cb.v2.state",       // expediente (nº spikes, intervalo medio)
+  "cb.v2.pre_capture", // similitud con patrones pre-spike aprendidos
+  "cb.v2.exit_time",   // time-stop antes del próximo spike
+  "cb.v2.sizing",      // tamaño recomendado
+  "cb.v2.quality",     // gate de calidad de datos
+  "cb.v2.threshold",   // umbral MAD vigente
 ];
 
 function _subscribeAlgo(algoName, symbol) {
@@ -512,13 +521,15 @@ function refreshChartVisuals() {
   const pct = total > 0 ? (favor / total) * 100 : 0;
   state.lastFavorPct = pct;
 
-  // 3. Canal de drift
+  // 3. Canal de drift (sigue siendo legacy, opcional)
   const channelKey = isCrash ? "crash.drift_channel" : "boom.drift_channel";
   if (state.algoData[channelKey]) drawDriftChannel(state.algoData[channelKey].metadata, isCrash);
 
-  // 4. Tensión de fondo
-  const tensionKey = isCrash ? "crash.tension" : "boom.tension";
-  if (state.algoData[tensionKey]) applyTensionBg(state.algoData[tensionKey].value, isCrash);
+  // 4. Fondo según hazard real (no por "tensión" inventada)
+  const hz = state.algoData["cb.v2.hazard"];
+  if (hz?.metadata?.p20?.p !== undefined && hz.metadata.p20.p !== null) {
+    applyTensionBg(hz.metadata.p20.p * 100, isCrash);
+  }
 
   // 5. Zonas de trade
   if (!_inSpikeCooldown()) drawTradeZones(symbol, isCrash, pct);
@@ -526,25 +537,63 @@ function refreshChartVisuals() {
   // 6. Panel señal final
   updateSignalPanel(symbol, isCrash, favor, total, pct);
 }
+// ---------- Señal local: ELIMINADA ----------
+// El sistema v2 NUNCA inventa probabilidades en el browser.
+// Si no hay datos del pipeline, el panel muestra WAIT y un aviso honesto.
 
-// ---------- Panel Señal Final — actualiza contenido ----------
+// ---------- Panel Señal Final v2 — sólo probabilidades reales del pipeline ----------
 function updateSignalPanel(symbol, isCrash, favor, total, pct) {
-  const key  = isCrash ? "crash.signal_final" : "boom.signal_final";
-  const data = state.algoData[key];
-  const action = data?.metadata?.action || (data ? data.signal : null);
+  const fbData = state.algoData["cb.v2.signal"];
+  const m = fbData?.metadata || null;
+
+  let action, score = null, details = [], reason, isLocal = false;
+
+  if (m && m.action) {
+    action = m.action;
+    reason = m.reason || fbData.interpretation || "";
+    score  = m.confidence_pct ?? null;
+
+    // Probabilidades reales (siempre primero, son el corazón v2)
+    const h = m.hazard || {};
+    if (h.p10_pct !== null && h.p10_pct !== undefined)
+      details.push({ label: "P(spike 10 velas)", val: `${h.p10_pct}%` });
+    if (h.p20_pct !== null && h.p20_pct !== undefined)
+      details.push({ label: "P(spike 20 velas)", val: `${h.p20_pct}%` });
+    if (h.p50_pct !== null && h.p50_pct !== undefined)
+      details.push({ label: "P(spike 50 velas)", val: `${h.p50_pct}%` });
+    if (h.samples !== undefined)
+      details.push({ label: "Spikes observados", val: h.samples });
+    if (m.regime !== undefined)
+      details.push({ label: "Régimen", val: m.regime });
+    if (m.bars_since_spike !== null && m.bars_since_spike !== undefined)
+      details.push({ label: "Velas desde spike", val: m.bars_since_spike });
+    if (m.pre_spike_similarity_pct !== undefined)
+      details.push({ label: "Similitud pre-spike", val: `${m.pre_spike_similarity_pct}%` });
+    if (m.patterns_learned !== undefined)
+      details.push({ label: "Patrones aprendidos", val: m.patterns_learned });
+    if (m.size_pct !== undefined)
+      details.push({ label: "Tamaño recomendado", val: `${m.size_pct}%` });
+    if (m.time_stop_bar !== null && m.time_stop_bar !== undefined)
+      details.push({ label: "Time-stop @ vela", val: m.time_stop_bar });
+  } else {
+    // Sin datos del pipeline → estado honesto: no inventamos nada
+    action = "WAIT";
+    score  = 0;
+    reason = "Esperando datos del pipeline v2 (sin inventos locales).";
+    isLocal = true;
+  }
+
   const actionLow = (action || "na").toLowerCase();
 
   // Dot de color en el botón
-  const dot = document.getElementById("signalBtnDot");
-  dot.className = `signal-btn__dot signal-btn__dot--${actionLow}`;
+  document.getElementById("signalBtnDot").className = `signal-btn__dot signal-btn__dot--${actionLow}`;
 
   // Acción principal
   const spAction = document.getElementById("spAction");
   spAction.className = `sp-action sp-action--${actionLow}`;
-  spAction.textContent = action || "Sin datos";
+  spAction.textContent = action || "—";
 
   // Score
-  const score = data?.metadata?.score ?? data?.value ?? null;
   document.getElementById("spScore").textContent = score !== null ? `${score}/100` : "—";
 
   // Barra
@@ -552,65 +601,52 @@ function updateSignalPanel(symbol, isCrash, favor, total, pct) {
   spBar.style.width = score !== null ? `${score}%` : "0%";
   spBar.className = `sp-bar sp-bar--${actionLow}`;
 
-  // Métricas de detalle (grid 2 columnas)
-  const details = [];
-  if (data?.metadata) {
-    const m = data.metadata;
-    if (m.regime !== undefined)      details.push({ label: "Régimen",    val: m.regime });
-    if (m.cycle_pct !== undefined)   details.push({ label: "Ciclo",      val: `${m.cycle_pct}%` });
-    if (m.risk_score !== undefined)  details.push({ label: "Riesgo",     val: `${m.risk_score}/100` });
-    if (m.confidence !== undefined)  details.push({ label: "Confianza",  val: `${m.confidence}%` });
-    if (m.rsi !== undefined)         details.push({ label: "RSI (7)",    val: m.rsi });
-    const barsKey = isCrash ? "bars_since_crash" : "bars_since_boom";
-    if (m[barsKey] !== undefined)    details.push({ label: "Velas desde spike", val: m[barsKey] });
-  }
+  // Métricas de detalle
   document.getElementById("spDetails").innerHTML = details.map(
     (d) => `<div class="sp-detail-item"><span class="sp-detail-label">${d.label}</span><span class="sp-detail-val">${d.val}</span></div>`
   ).join("");
 
-  // Interpretación
-  document.getElementById("spReason").textContent = data?.interpretation || "Esperando datos de Firebase…";
+  // Interpretación + warnings honestos
+  let warningsHtml = "";
+  if (m && Array.isArray(m.warnings) && m.warnings.length) {
+    warningsHtml = m.warnings.map(w =>
+      `<div style="color:#ff7043;font-size:10px;margin-top:2px">⚠ ${w}</div>`
+    ).join("");
+  }
+  const badge = isLocal
+    ? `<span style="color:#ffd54f;font-size:9px;display:block;margin-bottom:4px">⏳ Sin datos v2 — el motor inicia tras la primera vela cerrada</span>`
+    : `<span style="color:#26a69a;font-size:9px;display:block;margin-bottom:4px">✓ Datos del pipeline v2 — probabilidades reales</span>`;
+  document.getElementById("spReason").innerHTML = badge + (reason || "") + warningsHtml;
 
-  // Contexto: mismos tags del overlay
-  const tensionKey = isCrash ? "crash.tension" : "boom.tension";
-  const overdueKey = isCrash ? "crash.spike_overdue" : "boom.spike_overdue";
-  const countKey   = isCrash ? "crash.tick_countdown" : "boom.tick_countdown";
-  const riskKey    = isCrash ? "crash.risk_composite" : "boom.risk_composite";
-  const probKey    = isCrash ? "crash.probability" : "boom.probability";
+  // Contexto: estado del expediente + dirección operativa correcta
   const ctx = [];
-
-  if (state.algoData[tensionKey]) {
-    const v = state.algoData[tensionKey].value;
-    const cls = v >= 70 ? "tag-hot" : v >= 40 ? "tag-warn" : "tag-ok";
-    ctx.push(`<span class="${cls}">⚡ Tensión ${v}/100</span>`);
+  const stateData = state.algoData["cb.v2.state"];
+  if (stateData?.metadata) {
+    const s = stateData.metadata;
+    if (s.num_spikes !== undefined)
+      ctx.push(`<span>📋 ${s.num_spikes} spikes registrados</span>`);
+    if (s.avg_interval)
+      ctx.push(`<span>⏱ Intervalo medio ${Math.round(s.avg_interval)} velas</span>`);
   }
-  if (state.algoData[overdueKey]) {
-    const v = Math.round(state.algoData[overdueKey].value);
-    const cls = v >= 80 ? "tag-hot" : v >= 50 ? "tag-warn" : "tag-ok";
-    ctx.push(`<span class="${cls}">⏱ Overdue ${v}%</span>`);
+  const hazardData = state.algoData["cb.v2.hazard"];
+  if (hazardData?.metadata?.p20?.p !== undefined && hazardData.metadata.p20.p !== null) {
+    const p20 = Math.round(hazardData.metadata.p20.p * 100);
+    const cls = p20 >= 50 ? "tag-hot" : p20 >= 25 ? "tag-warn" : "tag-ok";
+    ctx.push(`<span class="${cls}">🎯 P20=${p20}%</span>`);
   }
-  if (state.algoData[countKey]) {
-    const v = Math.round(state.algoData[countKey].value);
-    ctx.push(`<span>🕐 ~${v} velas estimadas</span>`);
+  const regimeData = state.algoData["cb.v2.regime"];
+  if (regimeData?.signal) {
+    const r = regimeData.signal;
+    const cls = r === "OVERDUE" ? "tag-hot" : r === "POST_SPIKE" ? "tag-ok" : "tag-warn";
+    ctx.push(`<span class="${cls}">🧭 ${r}</span>`);
   }
-  if (state.algoData[riskKey]) {
-    const v = Math.round(state.algoData[riskKey].value);
-    const cls = v >= 70 ? "tag-hot" : v >= 40 ? "tag-warn" : "tag-ok";
-    ctx.push(`<span class="${cls}">🎯 Riesgo compuesto ${v}/100</span>`);
+  const qualityData = state.algoData["cb.v2.quality"];
+  if (qualityData) {
+    const ok = qualityData.value === true;
+    ctx.push(`<span class="${ok?"tag-ok":"tag-hot"}">🩺 Datos ${ok?"OK":"BLOQUEADOS"}</span>`);
   }
-  if (state.algoData[probKey]) {
-    const m = state.algoData[probKey].metadata;
-    if (m) {
-      const p10 = m.prob_10 !== undefined ? `${(m.prob_10 * 100).toFixed(0)}%` : "—";
-      const p20 = m.prob_20 !== undefined ? `${(m.prob_20 * 100).toFixed(0)}%` : "—";
-      ctx.push(`<span>📊 Prob. 10v: ${p10} · 20v: ${p20}</span>`);
-    }
-  }
-  // Señal de consenso (del overlay existente)
-  const dir = isCrash ? "⬇ Crash" : "⬆ Boom";
-  const cons = pct >= 55 ? "Fuerte" : pct >= 35 ? "Moderada" : "Débil";
-  const cls  = pct >= 55 ? "tag-ok" : pct >= 35 ? "tag-warn" : "tag-hot";
-  ctx.push(`<span class="${cls}">📈 ${dir} ${cons} (${favor}/${total} algos · ${pct.toFixed(0)}%)</span>`);
+  // Dirección operativa (recordatorio explícito al humano)
+  ctx.push(`<span>${isCrash ? "⬇ Crash → SELL" : "⬆ Boom → BUY"}</span>`);
 
   document.getElementById("spContext").innerHTML = ctx.join("");
 }

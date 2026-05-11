@@ -13,7 +13,15 @@ from scipy import stats
 from algorithms._base import AlgorithmBase, AlgorithmResult, register
 from algorithms.crash_boom.spike_detector import SPIKE_ATR_MULTIPLIER
 from algorithms.crash_boom.drift_exhaustion import _rsi_of_series
-from algorithms.crash_boom.drift_volatility import _atr
+
+
+def _atr(window: pd.DataFrame, period: int = 14) -> float:
+    """ATR clásico de Wilder simplificado (sobre OHLC)."""
+    h, l, c = window["high"], window["low"], window["close"]
+    tr = pd.concat([(h - l).abs(),
+                    (h - c.shift()).abs(),
+                    (l - c.shift()).abs()], axis=1).max(axis=1)
+    return float(tr.tail(period).mean())
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
